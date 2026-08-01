@@ -20,23 +20,7 @@ if(NOT SVNPLUS_INCLUDE_DIR OR NOT SVNPLUS_LIBRARY)
     message(FATAL_ERROR "libsvnplus not found under LIBSVNPLUS_ROOT=${LIBSVNPLUS_ROOT}")
 endif()
 
-add_executable(svnsyncdrive
-    src/main.cpp
-    src/ui/MainWindow.cpp
-    src/ui/MainWindow.h
-)
-
-target_include_directories(svnsyncdrive PRIVATE
-    "${SVNPLUS_INCLUDE_DIR}"
-    "${LIBSVNPLUS_ROOT}/include/subversion-1"
-)
-
-target_compile_definitions(svnsyncdrive PRIVATE SVNPLUS_STATIC)
-
-target_link_libraries(svnsyncdrive PRIVATE
-    Qt6::Widgets
-    Qt6::Network
-    Qt6::Sql
+set(SVNPLUS_LIBS
     "${SVNPLUS_LIBRARY}"
     "${LIBSVNPLUS_ROOT}/lib/libsvn_client-1.lib"
     "${LIBSVNPLUS_ROOT}/lib/libsvn_subr-1.lib"
@@ -44,10 +28,56 @@ target_link_libraries(svnsyncdrive PRIVATE
     "${LIBSVNPLUS_ROOT}/lib/libaprutil-1.lib"
 )
 
-file(GLOB LIBSVN_RUNTIME_DLLS "${LIBSVNPLUS_ROOT}/bin/*.dll")
-add_custom_command(TARGET svnsyncdrive POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${LIBSVN_RUNTIME_DLLS}
-        "$<TARGET_FILE_DIR:svnsyncdrive>"
-    COMMENT "Copying libsvn runtime DLLs next to the executable"
+# ── core library (no GUI dependency) ──────────────────────────────────────
+add_library(svnsync_core STATIC
+    src/core/SvnCommand.cpp
+    src/core/SvnWorker.cpp
+    src/core/RepoWatcher.cpp
+    src/core/SyncEngine.cpp
+    src/core/ConfigStore.cpp
+    src/core/Repository.h
+    src/core/SvnCommand.h
+    src/core/ICommandRunner.h
+    src/core/SvnWorker.h
+    src/core/RepoWatcher.h
+    src/core/SyncEngine.h
+    src/core/ConfigStore.h
 )
+
+target_include_directories(svnsync_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(svnsync_core PUBLIC
+    "${SVNPLUS_INCLUDE_DIR}"
+    "${LIBSVNPLUS_ROOT}/include/subversion-1"
+)
+target_compile_definitions(svnsync_core PUBLIC SVNPLUS_STATIC)
+target_link_libraries(svnsync_core PUBLIC Qt6::Core PRIVATE ${SVNPLUS_LIBS})
+
+# Copies the libsvn runtime DLLs next to a target so it can start standalone.
+function(copy_libsvn_runtime_dlls TARGET)
+    file(GLOB LIBSVN_RUNTIME_DLLS "${LIBSVNPLUS_ROOT}/bin/*.dll")
+    add_custom_command(TARGET ${TARGET} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${LIBSVN_RUNTIME_DLLS}
+            "$<TARGET_FILE_DIR:${TARGET}>"
+        COMMENT "Copying libsvn runtime DLLs next to ${TARGET}")
+endfunction()
+
+# ── GUI application ───────────────────────────────────────────────────────
+add_executable(svnsyncdrive
+    src/main.cpp
+    src/ui/MainWindow.cpp
+    src/ui/MainWindow.h
+)
+
+target_link_libraries(svnsyncdrive PRIVATE
+    svnsync_core
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Sql
+)
+copy_libsvn_runtime_dlls(svnsyncdrive)
+
+# ── console test harness ─────────────────────────────────────────────────
+add_executable(synccoretest tests/coretest/main.cpp)
+target_link_libraries(synccoretest PRIVATE svnsync_core)
+copy_libsvn_runtime_dlls(synccoretest)

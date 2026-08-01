@@ -1,5 +1,6 @@
 #include <QApplication>
 
+#include "core/Repository.h"
 #include "ui/MainWindow.h"
 
 int main(int argc, char *argv[])
@@ -11,5 +12,21 @@ int main(int argc, char *argv[])
 
     MainWindow window;
     window.show();
+
+    // Optional live mode: SvnSyncDrive --repo <wc> <url> [user] [pass]
+    const QStringList args = app.arguments();
+    const int idx = args.indexOf(QStringLiteral("--repo"));
+    if (idx >= 0 && idx + 2 < args.size()) {
+        svnsync::Repository repo;
+        repo.name = QStringLiteral("CLI");
+        repo.path = args.at(idx + 1);
+        repo.url = args.at(idx + 2);
+        if (idx + 3 < args.size())
+            repo.username = args.at(idx + 3);
+        if (idx + 4 < args.size())
+            repo.password = args.at(idx + 4);
+        window.startRepository(repo);
+    }
+
     return app.exec();
 }
