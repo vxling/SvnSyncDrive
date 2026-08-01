@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Widgets Network Sql)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Widgets Network)
 
 if(NOT DEFINED LIBSVNPLUS_ROOT)
     set(LIBSVNPLUS_ROOT "C:/Users/xuser/Documents/LibSVNPlus/build/_stage"
@@ -64,6 +64,35 @@ function(copy_libsvn_runtime_dlls TARGET)
         COMMENT "Copying libsvn runtime DLLs next to ${TARGET}")
 endfunction()
 
+# Runs windeployqt next to a target so the executable and all Qt DLLs and
+# plugins (platforms, styles, imageformats, tls, sqldrivers, ...) are staged
+# for direct launch. Windows-only for now; Linux/macOS packaging can use the
+# same pattern with their platform deploy tools later.
+function(deploy_qt TARGET)
+    if(NOT WIN32)
+        return()
+    endif()
+    get_target_property(QT_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
+    if(NOT QT_QMAKE_EXECUTABLE)
+        message(WARNING "deploy_qt(${TARGET}): Qt6::qmake not found, skipping")
+        return()
+    endif()
+    get_filename_component(QT_BIN_DIR "${QT_QMAKE_EXECUTABLE}" DIRECTORY)
+    set(WINDEPLOYQT "${QT_BIN_DIR}/windeployqt${CMAKE_EXECUTABLE_SUFFIX}")
+    if(NOT EXISTS "${WINDEPLOYQT}")
+        message(WARNING "deploy_qt(${TARGET}): windeployqt not found, skipping")
+        return()
+    endif()
+    add_custom_command(TARGET ${TARGET} POST_BUILD
+        COMMAND "${WINDEPLOYQT}"
+            --no-translations
+            --no-system-d3d-compiler
+            --no-opengl-sw
+            "$<IF:$<CONFIG:Debug>,--debug,--release>"
+            "$<TARGET_FILE:${TARGET}>"
+        COMMENT "Running windeployqt for ${TARGET}")
+endfunction()
+
 # ── GUI application ───────────────────────────────────────────────────────
 add_executable(svnsyncdrive
     src/main.cpp
@@ -83,14 +112,15 @@ target_link_libraries(svnsyncdrive PRIVATE
     svnsync_core
     Qt6::Widgets
     Qt6::Network
-    Qt6::Sql
 )
 copy_libsvn_runtime_dlls(svnsyncdrive)
+deploy_qt(svnsyncdrive)
 
 # ── console test harness ─────────────────────────────────────────────────
 add_executable(synccoretest tests/coretest/main.cpp)
 target_link_libraries(synccoretest PRIVATE svnsync_core)
 copy_libsvn_runtime_dlls(synccoretest)
+deploy_qt(synccoretest)
 
 # ── temporary diagnostics ─────────────────────────────────────────────────
 add_executable(diagmanager tests/diagmanager/main.cpp)
