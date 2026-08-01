@@ -67,6 +67,7 @@ bool RepoWatcher::start(const QString &path, int debounceMs)
     m_watchPath = QDir::toNativeSeparators(path);
     m_debounceMs = qMax(200, debounceMs);
     m_stopRequested = false;
+    m_lastEmitMs = nowMs();
     m_running = true;
     m_thread = std::thread(&RepoWatcher::run, this);
     return true;
@@ -158,10 +159,8 @@ void RepoWatcher::run()
                 const QString name = QString::fromWCharArray(record->FileName, nameChars);
                 const QString full =
                     QDir::fromNativeSeparators(m_watchPath + QLatin1Char('/') + name);
-                if (!shouldIgnore(full)) {
+                if (!shouldIgnore(full))
                     m_pending.insert(full);
-                    m_lastEventMs = nowMs();
-                }
                 if (record->NextEntryOffset == 0)
                     break;
                 ptr += record->NextEntryOffset;
@@ -195,8 +194,15 @@ void RepoWatcher::collectAndMaybeEmit()
 {
     if (m_pending.isEmpty())
         return;
-    if (nowMs() - m_lastEventMs < m_debounceMs)
+    // Throttle, not an idle-timeout: emit at most one batch per debounceMs.
+    // An idle-timeout means continuous filesystem activity (e.g. SVN writing
+    // to the working copy while we sync) keeps resetting the timer and can
+    // postpone a batch indefinitely. With a throttle, a batch is guaranteed
+    // to go out every debounceMs while anything is pending, so a busy working
+    // copy still makes progress.
+    if (nowMs() - m_lastEmitMs < m_debounceMs)
         return;
+    m_lastEmitMs = nowMs();
     const QStringList batch = m_pending.values();
     m_pending.clear();
     emit filesChanged(batch);

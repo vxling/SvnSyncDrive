@@ -74,8 +74,16 @@ void SyncEngine::stop()
 
 void SyncEngine::syncNow()
 {
-    if (m_started)
-        scanAndCommit();
+    if (!m_started)
+        return;
+    if (m_scanning) {
+        // A scan is already running; schedule a follow-up so this batch is
+        // not silently dropped (the current scan's status snapshot may
+        // already be past the changed files).
+        m_rescanPending = true;
+        return;
+    }
+    scanAndCommit();
 }
 
 quint64 SyncEngine::submit(const CommandItem &item, Callback callback)
@@ -109,33 +117,22 @@ void SyncEngine::onWatcherBatch(const QStringList &paths)
 
 void SyncEngine::enqueueFileChange(const QString &path)
 {
-    const bool exists = QFileInfo::exists(path);
-    const QString versionedQ = QStringLiteral("true");
+    if (!QFileInfo::exists(path)) {
+        CommandItem query;
+        query.command = Command::IsVersioned;
+        query.path = path;
 
-    CommandItem query;
-    query.command = Command::IsVersioned;
-    query.path = path;
-
-    if (!exists) {
-        submit(query, [this, path, versionedQ](const CommandResult &r) {
-            if (r.success && r.value == versionedQ) {
+        submit(query, [this, path](const CommandResult &r) {
+            if (r.success && r.value == QStringLiteral("true")) {
                 CommandItem del;
                 del.command = Command::Delete;
                 del.path = path;
                 submit(del);
             }
         });
-        return;
     }
-
-    submit(query, [this, path, versionedQ](const CommandResult &r) {
-        if (r.success && r.value != versionedQ) {
-            CommandItem add;
-            add.command = Command::Add;
-            add.path = path;
-            submit(add);
-        }
-    });
+    // Existing files need no direct action: the status scan triggered by the
+    // batch auto-adds unversioned files and commits versioned changes.
 }
 
 void SyncEngine::scanAndCommit()
@@ -170,33 +167,65 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
         }
         if (e.conflicted)
             continue;
-        if (e.nodeStatus != StatusKind::Normal)
+        if (e.nodeStatus != StatusKind::Normal) {
             changes.append(e);
+        }
     }
 
+    // Auto-add unversioned files, but never submit a second Add for a path
+    // that already has one in flight: the worker dedups LocalWrite commands
+    // by path, so a duplicate submit would never produce a result and would
+    // corrupt our completion bookkeeping. Once all pending adds land we
+    // re-scan so the freshly-added files get committed.
     for (const auto &p : unversioned) {
+        if (m_pendingAdds.contains(p))
+            continue;
+        m_pendingAdds.insert(p);
         CommandItem add;
         add.command = Command::Add;
         add.path = p;
-        submit(add);
+        submit(add, [this, p](const CommandResult &) {
+            m_pendingAdds.remove(p);
+            onAutoAddCompleted();
+        });
     }
 
     const auto groups = groupByDir(changes, m_repo.path);
-    m_pendingCommits = 0;
     for (const auto &g : groups) {
+        if (m_pendingCommits.contains(g.dir))
+            continue;
+        m_pendingCommits.insert(g.dir);
         CommandItem commit;
         commit.command = Command::Commit;
         commit.path = g.dir;
         commit.message = commitMessage(g.dir, g.count, g.firstFile);
-        ++m_pendingCommits;
-        submit(commit, [this](const CommandResult &) {
-            --m_pendingCommits;
-            if (m_pendingCommits <= 0)
-                finishScan();
+        submit(commit, [this, g](const CommandResult &) {
+            m_pendingCommits.remove(g.dir);
+            onCommitCompleted();
         });
     }
 
-    if (m_pendingCommits == 0)
+    maybeFinishScan();
+}
+
+void SyncEngine::onAutoAddCompleted()
+{
+    if (m_pendingAdds.isEmpty()) {
+        // The scan that found the unversioned files could not commit them
+        // (they were not versioned yet), so re-scan to commit what we added.
+        m_rescanPending = true;
+        maybeFinishScan();
+    }
+}
+
+void SyncEngine::onCommitCompleted()
+{
+    maybeFinishScan();
+}
+
+void SyncEngine::maybeFinishScan()
+{
+    if (m_scanning && m_pendingCommits.isEmpty() && m_pendingAdds.isEmpty())
         finishScan();
 }
 
@@ -207,6 +236,10 @@ void SyncEngine::finishScan()
     m_scanning = false;
     emit filesChanged();
     notify(tr("批量同步完成"));
+    if (m_rescanPending) {
+        m_rescanPending = false;
+        scanAndCommit();
+    }
 }
 
 bool SyncEngine::isTempFile(const QString &path)
@@ -233,6 +266,7 @@ QList<SyncEngine::CommitGroup> SyncEngine::groupByDir(const QList<StatusEntry> &
         if (dir.isEmpty() || dir == root)
             dir = root;
         CommitGroup &g = byDir[dir];
+        g.dir = dir;
         ++g.count;
         if (g.firstFile.isEmpty())
             g.firstFile = path.section(QLatin1Char('/'), -1);

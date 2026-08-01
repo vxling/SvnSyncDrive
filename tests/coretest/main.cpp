@@ -314,23 +314,53 @@ static bool runLiveRepo(const QString &wc, const QString &url,
     const bool committed = waitUntil([&] { return fileChangeCount > 0; }, 30000);
     check(committed, "auto-commit completed (filesChanged fired)");
 
-    // Wait a moment for the commit to settle, then verify the file is versioned.
-    QThread::msleep(1500);
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    // A second file written after the first batch must also be committed by a
+    // follow-up scan (the scan that saw it first may have run before its Add).
+    const QString probe2 = wc + QStringLiteral("/live_probe2_%1.txt").arg(QDateTime::currentMSecsSinceEpoch());
+    writeFile(probe2, QStringLiteral("second probe\n"));
+    std::printf("  created probe2: %s\n", qPrintable(probe2));
 
-    bool versioned = false;
-    std::vector<SvnPlus::SvnStatus> statuses;
-    SvnPlus::SvnClient client;
-    SvnPlus::SvnStatusOptions opts;
-    const SvnPlus::SvnError err = client.status(probeFile.toStdString(), statuses, opts);
-    if (err.ok()) {
-        for (const auto &s : statuses)
-            if (s.versioned)
-                versioned = true;
+    // Wait for the engine to finish committing, then verify BOTH files are
+    // actually committed (schedule Normal, not Added). Poll each probe file
+    // individually via `info` (per-file, cheap, and -- unlike `svn status`,
+    // which does not report clean files -- it reports schedule for committed
+    // files too) so the test thread never runs a full `svn status -R` on the
+    // same working copy the worker is committing into.
+    auto bothNormal = [&probeFile, &probe2]() {
+        SvnPlus::SvnClient client;
+        static QString lastState;
+        QString cur;
+        int seen = 0;
+        int normal = 0;
+        for (const QString &path : { probeFile, probe2 }) {
+            std::vector<SvnPlus::SvnInfo> infos;
+            const SvnPlus::SvnError err =
+                client.info(path.toStdString(), infos, SvnPlus::SvnRevision::working(),
+                            SvnPlus::SvnDepth::Empty);
+            if (!err.ok() || infos.empty()) {
+                cur += QStringLiteral("|none");
+                continue;
+            }
+            ++seen;
+            cur += QStringLiteral("|%1").arg(int(infos[0].schedule));
+            if (infos[0].schedule == SvnPlus::SvnSchedule::Normal && infos[0].revision >= 1)
+                ++normal;
+        }
+        if (cur != lastState) {
+            lastState = cur;
+            std::printf("    probe state [%s%s]\n",
+                        seen == 2 ? "both" : (seen == 1 ? "one" : "none"),
+                        qPrintable(cur));
+        }
+        return seen == 2 && normal == 2;
+    };
+
+    const bool committed2 = waitUntil(bothNormal, 30000);
+    check(committed2, "both probe files are fully committed (Normal, not Added)");
+    if (!committed2) {
+        std::printf("  note: probes were added but not committed; "
+                    "prints probe status above for diagnosis\n");
     }
-    check(versioned, "probe file is under version control after auto-commit");
-    if (err.ok() && !versioned)
-        std::printf("  note: status ok but probe not versioned (commit may still be pending)\n");
 
     std::printf("  notifications (%d):\n", int(notifications.size()));
     for (const auto &n : notifications)
@@ -342,7 +372,7 @@ static bool runLiveRepo(const QString &wc, const QString &url,
     }
 
     engine.stop();
-    return committed && versioned;
+    return committed && committed2;
 }
 
 int main(int argc, char *argv[])

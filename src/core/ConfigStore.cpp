@@ -16,22 +16,22 @@ QList<Repository> ConfigStore::loadRepositories()
     QSettings settings(kOrganization, kApplication);
     QList<Repository> repositories;
 
-    const QStringList names = settings.childGroups();
     settings.beginGroup(kReposGroup);
+    const QStringList names = settings.childGroups();
     for (const auto &name : names) {
-        if (settings.childGroups().contains(name)) {
-            settings.beginGroup(name);
-            Repository repo;
-            repo.name = name;
-            repo.path = settings.value(QStringLiteral("path")).toString();
-            repo.url = settings.value(QStringLiteral("url")).toString();
-            repo.username = settings.value(QStringLiteral("username")).toString();
-            repo.password = settings.value(QStringLiteral("password")).toString();
-            repo.isActive = settings.value(QStringLiteral("isActive"), false).toBool();
-            settings.endGroup();
-            if (!repo.path.isEmpty())
-                repositories.append(repo);
-        }
+        settings.beginGroup(name);
+        Repository repo;
+        repo.name = name;
+        repo.path = settings.value(QStringLiteral("path")).toString();
+        repo.url = settings.value(QStringLiteral("url")).toString();
+        repo.username = settings.value(QStringLiteral("username")).toString();
+        repo.password = settings.value(QStringLiteral("password")).toString();
+        repo.state = static_cast<RepoState>(
+            settings.value(QStringLiteral("state"),
+                           static_cast<int>(RepoState::Background)).toInt());
+        settings.endGroup();
+        if (!repo.path.isEmpty())
+            repositories.append(repo);
     }
     settings.endGroup();
     return repositories;
@@ -48,7 +48,7 @@ void ConfigStore::saveRepositories(const QList<Repository> &repositories)
         settings.setValue(QStringLiteral("url"), repo.url);
         settings.setValue(QStringLiteral("username"), repo.username);
         settings.setValue(QStringLiteral("password"), repo.password);
-        settings.setValue(QStringLiteral("isActive"), repo.isActive);
+        settings.setValue(QStringLiteral("state"), static_cast<int>(repo.state));
         settings.endGroup();
     }
     settings.endGroup();

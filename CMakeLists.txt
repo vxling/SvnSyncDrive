@@ -34,6 +34,7 @@ add_library(svnsync_core STATIC
     src/core/SvnWorker.cpp
     src/core/RepoWatcher.cpp
     src/core/SyncEngine.cpp
+    src/core/RepoManager.cpp
     src/core/ConfigStore.cpp
     src/core/Repository.h
     src/core/SvnCommand.h
@@ -41,6 +42,7 @@ add_library(svnsync_core STATIC
     src/core/SvnWorker.h
     src/core/RepoWatcher.h
     src/core/SyncEngine.h
+    src/core/RepoManager.h
     src/core/ConfigStore.h
 )
 
@@ -67,6 +69,14 @@ add_executable(svnsyncdrive
     src/main.cpp
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
+    src/ui/RepoListPanel.cpp
+    src/ui/RepoListPanel.h
+    src/ui/RepoDetailPage.cpp
+    src/ui/RepoDetailPage.h
+    src/ui/FileBrowser.cpp
+    src/ui/FileBrowser.h
+    src/ui/AddRepoDialog.cpp
+    src/ui/AddRepoDialog.h
 )
 
 target_link_libraries(svnsyncdrive PRIVATE
@@ -81,3 +91,8 @@ copy_libsvn_runtime_dlls(svnsyncdrive)
 add_executable(synccoretest tests/coretest/main.cpp)
 target_link_libraries(synccoretest PRIVATE svnsync_core)
 copy_libsvn_runtime_dlls(synccoretest)
+
+# ── temporary diagnostics ─────────────────────────────────────────────────
+add_executable(diagmanager tests/diagmanager/main.cpp)
+target_link_libraries(diagmanager PRIVATE svnsync_core)
+copy_libsvn_runtime_dlls(diagmanager)

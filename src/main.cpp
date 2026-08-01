@@ -8,7 +8,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName("SvnSyncDrive");
     app.setOrganizationName("SvnSyncDrive");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion("0.2.0");
 
     MainWindow window;
     window.show();
@@ -25,6 +25,7 @@ int main(int argc, char *argv[])
             repo.username = args.at(idx + 3);
         if (idx + 4 < args.size())
             repo.password = args.at(idx + 4);
+        repo.state = svnsync::RepoState::Active;
         window.startRepository(repo);
     }
 

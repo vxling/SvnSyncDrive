@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QStringList>
 #include <QTimer>
 
@@ -47,15 +48,19 @@ public:
 
     const Repository &repository() const { return m_repo; }
 
+    using Callback = std::function<void(const CommandResult &)>;
+
+    /** Submit a command to this repo's own queue; the callback runs on
+     *  the GUI thread when the result is ready. ReadOnly commands (e.g.
+     *  Status) are executed with priority and never block other repos. */
+    quint64 submit(const CommandItem &item, Callback callback = Callback());
+
 signals:
     void syncNotification(const QString &message);
     void filesChanged();
     void conflictDetected(const QStringList &conflictedPaths);
 
 private:
-    using Callback = std::function<void(const CommandResult &)>;
-
-    quint64 submit(const CommandItem &item, Callback callback = Callback());
     void onResult(quint64 id, const CommandResult &result);
 
     // Upward sync.
@@ -63,6 +68,9 @@ private:
     void enqueueFileChange(const QString &path);
     void scanAndCommit();
     void handleScanStatus(const CommandResult &result);
+    void onAutoAddCompleted();
+    void onCommitCompleted();
+    void maybeFinishScan();
     void finishScan();
     static bool isTempFile(const QString &path);
 
@@ -99,8 +107,10 @@ private:
 
     bool m_started = false;
     bool m_scanning = false;
+    bool m_rescanPending = false;
     bool m_polling = false;
-    int m_pendingCommits = 0;
+    QSet<QString> m_pendingCommits;
+    QSet<QString> m_pendingAdds;
     int m_pendingUpdates = 0;
 };
 

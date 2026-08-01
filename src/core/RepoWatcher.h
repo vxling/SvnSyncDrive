@@ -52,7 +52,7 @@ private:
 
     // Touched only on the watcher thread.
     QSet<QString> m_pending;
-    qint64 m_lastEventMs = 0;
+    qint64 m_lastEmitMs = 0;
 };
 
 } // namespace svnsync
