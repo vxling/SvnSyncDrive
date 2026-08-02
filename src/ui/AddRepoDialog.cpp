@@ -14,7 +14,6 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
-#include <QStandardPaths>
 #include <QVBoxLayout>
 
 AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
@@ -127,9 +126,9 @@ void AddRepoDialog::setTrustServerCertificate(bool trust)
 
 QString AddRepoDialog::defaultPathFor(const QString &name)
 {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (dir.isEmpty())
-        dir = QDir::homePath();
+    // Cross-platform default: ~/SvnSyncDrive/<name>. Keeps every platform's
+    // working copies in the same predictable place under the user's home.
+    QString dir = QDir::homePath() + QLatin1String("/SvnSyncDrive");
     QString folder = name.trimmed();
     folder.replace(
         QRegularExpression(QStringLiteral(R"([\\/:*?"<>|])")), QStringLiteral("_"));

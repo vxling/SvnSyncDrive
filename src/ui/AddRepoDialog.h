@@ -21,7 +21,7 @@ struct CommandResult;
  * credentials and an initial state. A "test connection" button verifies
  * the URL through a temporary SvnWorker.
  *
- * In add mode the working copy path defaults to Documents/<name> and is
+ * In add mode the working copy path defaults to ~/SvnSyncDrive/<name> and is
  * freely editable (overridable via "浏览…"). On "添加" the path is
  * validated: it is created if missing, must be empty (or an existing
  * working copy) to be accepted, and a fresh working copy is checked out
