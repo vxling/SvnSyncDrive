@@ -25,8 +25,8 @@ SyncEngine::SyncEngine(const Repository &repository, QObject *parent)
     , m_worker(std::make_unique<SvnWorker>(nullptr))
     , m_watcher(std::make_unique<RepoWatcher>(nullptr))
 {
-    m_pollTimer.setInterval(60 * 1000);
-    m_fullSyncTimer.setInterval(15 * 60 * 1000);
+    m_pollTimer.setInterval(m_config.pollIntervalMs);
+    m_fullSyncTimer.setInterval(m_config.fullSyncIntervalMs);
 
     connect(&m_pollTimer, &QTimer::timeout, this, &SyncEngine::poll);
     connect(&m_fullSyncTimer, &QTimer::timeout, this, &SyncEngine::fullSync);
@@ -49,7 +49,7 @@ void SyncEngine::start()
 
     m_worker->start();
     m_worker->setCredentials(m_repo.username, m_repo.password);
-    m_worker->setTrustServerCertificate(true);
+    m_worker->setTrustServerCertificate(m_config.trustServerCertificate);
 
     if (!m_watcher->start(m_repo.path))
         notify(tr("无法监听目录: %1").arg(m_repo.path));
@@ -59,6 +59,26 @@ void SyncEngine::start()
 
     // Immediate downward sync to pick up other machines' changes.
     poll();
+
+    // Immediate upward scan: file-system events raised around startup may be
+    // missed while the watcher is being set up, so scan once to commit any
+    // changes already present (including leftovers from a previous run).
+    scanAndCommit();
+}
+
+void SyncEngine::setConfig(const GlobalConfig &config)
+{
+    m_config = config;
+    m_pollTimer.setInterval(m_config.pollIntervalMs);
+    m_fullSyncTimer.setInterval(m_config.fullSyncIntervalMs);
+    m_worker->setTrustServerCertificate(m_config.trustServerCertificate);
+}
+
+void SyncEngine::setCredentials(const QString &username, const QString &password)
+{
+    m_repo.username = username;
+    m_repo.password = password;
+    m_worker->setCredentials(username, password);
 }
 
 void SyncEngine::stop()
@@ -90,6 +110,8 @@ quint64 SyncEngine::submit(const CommandItem &item, Callback callback)
 {
     CommandItem copy = item;
     copy.id = m_idCounter.fetch_add(1) + 1;
+    if (copy.repo.isEmpty())
+        copy.repo = m_repo.name;
     if (callback)
         m_pending.insert(copy.id, std::move(callback));
     m_worker->submit(copy);
@@ -177,17 +199,19 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
     // by path, so a duplicate submit would never produce a result and would
     // corrupt our completion bookkeeping. Once all pending adds land we
     // re-scan so the freshly-added files get committed.
-    for (const auto &p : unversioned) {
-        if (m_pendingAdds.contains(p))
-            continue;
-        m_pendingAdds.insert(p);
-        CommandItem add;
-        add.command = Command::Add;
-        add.path = p;
-        submit(add, [this, p](const CommandResult &) {
-            m_pendingAdds.remove(p);
-            onAutoAddCompleted();
-        });
+    if (m_config.autoAddUnversioned) {
+        for (const auto &p : unversioned) {
+            if (m_pendingAdds.contains(p))
+                continue;
+            m_pendingAdds.insert(p);
+            CommandItem add;
+            add.command = Command::Add;
+            add.path = p;
+            submit(add, [this, p](const CommandResult &) {
+                m_pendingAdds.remove(p);
+                onAutoAddCompleted();
+            });
+        }
     }
 
     const auto groups = groupByDir(changes, m_repo.path);
@@ -199,8 +223,10 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
         commit.command = Command::Commit;
         commit.path = g.dir;
         commit.message = commitMessage(g.dir, g.count, g.firstFile);
-        submit(commit, [this, g](const CommandResult &) {
+        submit(commit, [this, g](const CommandResult &r) {
             m_pendingCommits.remove(g.dir);
+            if (r.success && r.revision > 0)
+                m_lastLocalRev = qMax(m_lastLocalRev, r.revision);
             onCommitCompleted();
         });
     }
@@ -308,7 +334,7 @@ void SyncEngine::poll()
             m_polling = false;
             return;
         }
-        const qlonglong localRev = lr.revision;
+        const qlonglong localRev = qMax(lr.revision, m_lastLocalRev);
 
         CommandItem headItem;
         headItem.command = Command::GetHeadRevision;
@@ -331,11 +357,27 @@ void SyncEngine::poll()
 
 void SyncEngine::fullSync()
 {
-    if (m_polling)
+    // 15-min periodic full sync: a whole-repo `svn update` (downward, in
+    // one pass, no GetServerUpdatePaths chunking) followed by a full
+    // upward scan+commit. Both actions always run, in that order.
+    if (m_fullSyncing || m_polling || m_scanning)
         return;
-    if (m_scanning)
-        return;
-    scanAndCommit();
+    m_fullSyncing = true;
+
+    CommandItem upd;
+    upd.command = Command::Update;
+    upd.path = m_repo.path;
+    upd.bypassDedup = true;  // must run and report, even if a user update is queued
+    submit(upd, [this](const CommandResult &r) {
+        if (!r.success)
+            notify(tr("定时全量同步更新失败: %1").arg(r.error));
+        detectConflicts([this]() {
+            emit filesChanged();
+            m_fullSyncing = false;
+            notify(tr("定时全量同步完成"));
+            scanAndCommit();
+        });
+    });
 }
 
 void SyncEngine::startUpdateInChunks(qlonglong serverRev, qlonglong localRev)
@@ -413,13 +455,20 @@ QStringList SyncEngine::mergeToDirs(const QStringList &paths, const QString &rep
     QSet<QString> dirs;
     for (const auto &path : paths) {
         const QString normalized = QDir::fromNativeSeparators(path);
-        const QString dir = pathLooksLikeFile(normalized)
+        QString dir = pathLooksLikeFile(normalized)
             ? normalized.section(QLatin1Char('/'), 0, -2)
             : normalized;
         if (dir.isEmpty())
-            dirs.insert(root);
-        else
-            dirs.insert(dir);
+            dir = root;
+        // svn status -u reports every intermediate of a remote tree that is
+        // not present locally, but svn update on a non-existent target fails
+        // with E155007 ("None of the targets are working copies"). Walk up to
+        // the nearest ancestor that actually exists; the WC root always does.
+        while (dir != root && !QFileInfo::exists(dir))
+            dir = dir.section(QLatin1Char('/'), 0, -2);
+        if (dir.isEmpty())
+            dir = root;
+        dirs.insert(dir);
     }
 
     QStringList result = dirs.values();

@@ -49,9 +49,15 @@ RepoListPanel::RepoListPanel(QWidget *parent)
     layout->addWidget(m_list, 1);
 
     auto *addButton = new QPushButton(QStringLiteral("+ 添加仓库"), this);
+    auto *settingsButton = new QPushButton(QStringLiteral("⚙ 设置"), this);
+    auto *aboutButton = new QPushButton(QStringLiteral("ℹ 关于"), this);
     layout->addWidget(addButton);
+    layout->addWidget(settingsButton);
+    layout->addWidget(aboutButton);
 
     connect(addButton, &QPushButton::clicked, this, &RepoListPanel::addRequested);
+    connect(settingsButton, &QPushButton::clicked, this, &RepoListPanel::settingsRequested);
+    connect(aboutButton, &QPushButton::clicked, this, &RepoListPanel::aboutRequested);
     connect(m_list, &QListWidget::itemSelectionChanged, this, [this] {
         const auto items = m_list->selectedItems();
         if (!items.isEmpty())
@@ -74,6 +80,7 @@ void RepoListPanel::setRepositories(const QList<svnsync::Repository> &repositori
 void RepoListPanel::rebuildRow(QListWidgetItem *item, const svnsync::Repository &repo)
 {
     auto *row = new QWidget(m_list);
+    row->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(6, 4, 6, 4);
     layout->setSpacing(8);
@@ -86,28 +93,22 @@ void RepoListPanel::rebuildRow(QListWidgetItem *item, const svnsync::Repository 
     name->setFont(nameFont);
     auto *path = new QLabel(repo.path, row);
     path->setStyleSheet(QStringLiteral("color: #888; font-size: 11px;"));
-    path->setTextInteractionFlags(Qt::TextSelectableByMouse);
     auto *badge = new QLabel(stateBadge(repo.state), row);
     badge->setStyleSheet(
         QStringLiteral("color: %1; font-size: 11px;").arg(stateColor(repo.state).name()));
+    // Row content must not swallow mouse events, otherwise clicks land on the
+    // labels/widgets and the list never selects the item (no switch happens).
+    for (auto *w : { static_cast<QWidget *>(name), static_cast<QWidget *>(path),
+                     static_cast<QWidget *>(badge) })
+        w->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     texts->addWidget(name);
     texts->addWidget(path);
     texts->addWidget(badge);
     row->setLayout(layout);
 
-    auto *remove = new QPushButton(QStringLiteral("✕"), row);
-    remove->setFixedSize(20, 20);
-    remove->setToolTip(QStringLiteral("移除仓库"));
-    remove->setFlat(true);
-
     layout->addLayout(texts, 1);
-    layout->addWidget(remove, 0, Qt::AlignTop);
 
     m_list->setItemWidget(item, row);
-
-    connect(remove, &QPushButton::clicked, this, [this, name = repo.name] {
-        emit removeRequested(name);
-    });
 }
 
 void RepoListPanel::setSelectedName(const QString &name)

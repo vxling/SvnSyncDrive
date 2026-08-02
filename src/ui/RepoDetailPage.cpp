@@ -4,13 +4,11 @@
 #include "ui/FileBrowser.h"
 
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTabWidget>
-#include <QUrl>
 #include <QVBoxLayout>
 
 namespace {
@@ -44,7 +42,7 @@ RepoDetailPage::RepoDetailPage(QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(8);
 
-    // Header: name + state + url/path + actions
+    // Header: name + state, with the remove action on the right.
     auto *header = new QWidget(this);
     auto *headLayout = new QVBoxLayout(header);
     headLayout->setContentsMargins(0, 0, 0, 0);
@@ -62,28 +60,11 @@ RepoDetailPage::RepoDetailPage(QWidget *parent)
     titleRow->addSpacing(12);
     titleRow->addWidget(m_stateLabel);
     titleRow->addStretch(1);
+    auto *configureButton = new QPushButton(QStringLiteral("⚙ 仓库配置"), header);
+    auto *removeButton = new QPushButton(QStringLiteral("🗑 移除仓库"), header);
+    titleRow->addWidget(configureButton);
+    titleRow->addWidget(removeButton);
     headLayout->addLayout(titleRow);
-
-    m_urlLabel = new QLabel(header);
-    m_urlLabel->setStyleSheet(QStringLiteral("color: #666;"));
-    m_urlLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    headLayout->addWidget(m_urlLabel);
-
-    m_pathLabel = new QLabel(header);
-    m_pathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    headLayout->addWidget(m_pathLabel);
-
-    auto *actions = new QHBoxLayout;
-    auto *syncButton = new QPushButton(QStringLiteral("立即同步"), header);
-    m_toggleButton = new QPushButton(QStringLiteral("启用同步"), header);
-    auto *openButton = new QPushButton(QStringLiteral("打开目录"), header);
-    auto *removeButton = new QPushButton(QStringLiteral("移除仓库"), header);
-    actions->addWidget(syncButton);
-    actions->addWidget(m_toggleButton);
-    actions->addStretch(1);
-    actions->addWidget(openButton);
-    actions->addWidget(removeButton);
-    headLayout->addLayout(actions);
 
     layout->addWidget(header);
 
@@ -91,17 +72,19 @@ RepoDetailPage::RepoDetailPage(QWidget *parent)
     m_browser = new FileBrowser(tabs);
     m_log = new QPlainTextEdit(tabs);
     m_log->setReadOnly(true);
-    m_log->setMaximumBlockCount(5000);
+    m_log->setMaximumBlockCount(20000);
     tabs->addTab(m_browser, QStringLiteral("文件"));
     tabs->addTab(m_log, QStringLiteral("日志"));
     layout->addWidget(tabs, 1);
 
-    connect(syncButton, &QPushButton::clicked, this, &RepoDetailPage::syncRequested);
-    connect(m_toggleButton, &QPushButton::clicked, this, &RepoDetailPage::toggleStateRequested);
-    connect(openButton, &QPushButton::clicked, this, [this] {
-        emit openInExplorerRequested();
-    });
+    connect(configureButton, &QPushButton::clicked, this, &RepoDetailPage::configureRequested);
     connect(removeButton, &QPushButton::clicked, this, &RepoDetailPage::removeRequested);
+    connect(m_browser, &FileBrowser::syncRequested,
+            this, &RepoDetailPage::syncRequested);
+    connect(m_browser, &FileBrowser::toggleStateRequested,
+            this, &RepoDetailPage::toggleStateRequested);
+    connect(m_browser, &FileBrowser::conflictScanRequested,
+            this, &RepoDetailPage::conflictScanRequested);
 
     setState(svnsync::RepoState::Deactive);
 }
@@ -110,8 +93,6 @@ void RepoDetailPage::setRepository(const svnsync::Repository &repo)
 {
     m_name = repo.name;
     m_nameLabel->setText(repo.name);
-    m_urlLabel->setText(repo.url);
-    m_pathLabel->setText(repo.path);
     m_browser->setRepository(repo.path);
     setState(repo.state);
 }
@@ -129,9 +110,7 @@ void RepoDetailPage::setState(svnsync::RepoState state)
     m_stateLabel->setStyleSheet(
         QStringLiteral("color: %1; font-weight: bold;")
             .arg(stateColor(state).name()));
-    m_toggleButton->setText(state == svnsync::RepoState::Deactive
-        ? QStringLiteral("启用同步")
-        : QStringLiteral("停用同步"));
+    m_browser->setToggleState(state);
 }
 
 void RepoDetailPage::appendLog(const QString &message)
@@ -139,6 +118,12 @@ void RepoDetailPage::appendLog(const QString &message)
     m_log->appendPlainText(
         QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")) +
         QStringLiteral("  ") + message);
+}
+
+void RepoDetailPage::setLogHistory(const QStringList &lines)
+{
+    if (!lines.isEmpty())
+        m_log->appendPlainText(lines.join(QLatin1Char('\n')));
 }
 
 void RepoDetailPage::refreshFiles()

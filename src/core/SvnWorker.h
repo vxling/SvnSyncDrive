@@ -65,6 +65,7 @@ private:
     bool heavyWriteAllowedLocked(const CommandItem &item);
     void removeFromDedupLocked(const CommandItem &item);
     QString dedupKey(const CommandItem &item) const;
+    void logModify(const CommandItem &item, const CommandResult &result);
 
     std::thread m_thread;
     RunnerFactory m_factory;

@@ -49,6 +49,18 @@ enum class Category {
 
 Category categoryOf(Command command);
 
+/**
+ * Localized SVN status depth, mirroring libsvnplus SvnDepth (core stays
+ * libsvnplus-free). Default for Status is Infinity (whole tree); a file
+ * browser only needs Immediates to render a directory's direct children.
+ */
+enum class StatusDepth : int {
+    Empty = 0,
+    Files = 1,
+    Immediates = 2,
+    Infinity = 3
+};
+
 /** Localized SVN status kind (kept free of libsvnplus types). */
 enum class StatusKind {
     None,
@@ -89,6 +101,7 @@ struct CommandItem
 {
     quint64 id = 0;
     Command command = Command::Info;
+    QString repo;             // owning repository name (for program logs)
     QString path;
     QString fromPath;
     QString message;          // commit log message
@@ -97,7 +110,9 @@ struct CommandItem
     QString password;
     QStringList updatePaths;  // update sub-paths (empty = whole working copy)
     bool checkOutOfDate = false;
+    bool bypassDedup = false;  // never coalesced away; must run and report a result
     int conflictChoice = 2;   // resolve choice: 0=Base 1=TheirsFull 2=MineFull 3=TheirsConflict 4=MineConflict 5=Merged
+    StatusDepth statusDepth = StatusDepth::Infinity;  // Status/GetConflictedFiles recursion scope
 };
 
 /** Result of a background command, delivered via SvnWorker::resultReady. */

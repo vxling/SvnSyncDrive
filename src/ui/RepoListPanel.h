@@ -28,8 +28,9 @@ public:
 
 signals:
     void repositorySelected(const QString &name);
-    void removeRequested(const QString &name);
     void addRequested();
+    void settingsRequested();
+    void aboutRequested();
 
 private:
     void rebuildRow(QListWidgetItem *item, const svnsync::Repository &repo);

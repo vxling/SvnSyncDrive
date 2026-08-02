@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/GlobalConfig.h"
 #include "core/Repository.h"
 
 #include <QObject>
@@ -44,10 +45,19 @@ public:
     void removeRepository(const QString &name);
     void setState(const QString &name, RepoState state);
 
+    /** Refresh the credentials used by a repository's engine. */
+    void setCredentials(const QString &name, const QString &username,
+                        const QString &password);
+
     /** Request an immediate upward sync for one repository. */
     void syncNow(const QString &name);
 
-signals:
+    GlobalConfig config() const { return m_config; }
+
+    /** Persist and apply new global settings to every running engine. */
+    void setConfig(const GlobalConfig &config);
+
+    signals:
     void repositoryListChanged();
     void repositoryStateChanged(const QString &name, RepoState state);
     void notification(const QString &name, const QString &message);
@@ -61,6 +71,7 @@ private:
     void stopEngine(const QString &name);
 
     QList<Repository> m_repos;
+    GlobalConfig m_config;
     std::unordered_map<QString, std::unique_ptr<SyncEngine>> m_engines;
 };
 

@@ -1,17 +1,24 @@
 #include "ui/MainWindow.h"
 
+#include "core/LogStore.h"
 #include "core/RepoManager.h"
 #include "core/SyncEngine.h"
 #include "ui/AddRepoDialog.h"
+#include "ui/AboutDialog.h"
+#include "ui/ConflictDialog.h"
 #include "ui/RepoDetailPage.h"
 #include "ui/RepoListPanel.h"
+#include "ui/SettingsDialog.h"
 
-#include <QDesktopServices>
+#include <QAction>
+#include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QMessageBox>
 #include <QStatusBar>
-#include <QUrl>
+#include <QStyle>
+#include <QSystemTrayIcon>
 
 #include <svnplus/SvnClient.h>
 
@@ -44,18 +51,25 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_statusText = new QLabel(QStringLiteral("就绪"), this);
     statusBar()->addWidget(m_statusText, 1);
-    statusBar()->showMessage(
+    auto *versionLabel = new QLabel(
         QStringLiteral("SvnSyncDrive %1 · libsvnplus %2 · Qt %3")
             .arg(QStringLiteral("0.2.0"),
                  QString::fromStdString(SvnPlus::SvnClient::version().toString()),
-                 QString::fromLatin1(qVersion())));
+                 QString::fromLatin1(qVersion())),
+        this);
+    versionLabel->setStyleSheet(QStringLiteral("color: #888;"));
+    statusBar()->addPermanentWidget(versionLabel);
 
     connect(m_sidebar, &RepoListPanel::repositorySelected,
             this, &MainWindow::selectRepository);
-    connect(m_sidebar, &RepoListPanel::removeRequested,
-            this, &MainWindow::onRemoveRequested);
     connect(m_sidebar, &RepoListPanel::addRequested,
             this, &MainWindow::onAddRequested);
+    connect(m_sidebar, &RepoListPanel::settingsRequested,
+            this, &MainWindow::onSettingsRequested);
+    connect(m_sidebar, &RepoListPanel::aboutRequested, this, [this] {
+        AboutDialog dlg(this);
+        dlg.exec();
+    });
 
     connect(m_manager.get(), &svnsync::RepoManager::repositoryListChanged,
             this, &MainWindow::rebuildSidebar);
@@ -73,6 +87,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_manager->load();
     rebuildSidebar();
+
+    setupTrayIcon();
 
     // Select the first running repository (prefer the persisted Active one).
     const auto repos = m_manager->repositories();
@@ -171,7 +187,7 @@ void MainWindow::onRemoveRequested(const QString &name)
 
 void MainWindow::onAddRequested()
 {
-    AddRepoDialog dialog(this);
+    AddRepoDialog dialog(false, this);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const svnsync::Repository repo = dialog.repository();
@@ -179,22 +195,125 @@ void MainWindow::onAddRequested()
     selectRepository(repo.name);
 }
 
+void MainWindow::onSettingsRequested()
+{
+    SettingsDialog dialog(this);
+    dialog.setConfig(m_manager->config());
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_manager->setConfig(dialog.config());
+    setGlobalStatus(QStringLiteral("设置已保存"));
+}
+
+void MainWindow::setupTrayIcon()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable())
+        return;
+
+    m_trayIcon = new QSystemTrayIcon(this);
+    m_trayIcon->setIcon(windowIcon().isNull()
+        ? style()->standardIcon(QStyle::SP_ComputerIcon)
+        : windowIcon());
+    m_trayIcon->setToolTip(QStringLiteral("SvnSyncDrive"));
+    if (m_trayIcon->icon().isNull())
+        m_trayIcon->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
+
+    auto *menu = new QMenu(this);
+    auto *showAction = menu->addAction(QStringLiteral("显示主窗口"));
+    auto *quitAction = menu->addAction(QStringLiteral("退出"));
+    menu->addSeparator();
+    m_trayIcon->setContextMenu(menu);
+
+    connect(showAction, &QAction::triggered, this, &MainWindow::showWindowFromTray);
+    connect(quitAction, &QAction::triggered, this, &MainWindow::quitApplication);
+    connect(m_trayIcon, &QSystemTrayIcon::activated, this,
+            [this](QSystemTrayIcon::ActivationReason reason) {
+                if (reason == QSystemTrayIcon::Trigger
+                    || reason == QSystemTrayIcon::DoubleClick)
+                    showWindowFromTray();
+            });
+
+    m_trayIcon->show();
+}
+
+void MainWindow::showWindowFromTray()
+{
+    show();
+    setWindowState(windowState() & ~Qt::WindowMinimized);
+    raise();
+    activateWindow();
+}
+
+void MainWindow::quitApplication()
+{
+    // Engines and their worker threads are torn down by RepoManager's
+    // destructor once the event loop exits.
+    qApp->quit();
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_trayIcon && m_manager->config().minimizeToTray) {
+        hide();
+        event->ignore();
+        return;
+    }
+    event->accept();
+}
+
 void MainWindow::showNotification(const QString &name, const QString &message)
 {
-    if (RepoDetailPage *page = pageFor(name))
-        page->appendLog(message);
+    logToRepo(name, message);
     if (name == m_selectedName)
         setGlobalStatus(QStringLiteral("%1 · %2").arg(name, message));
 }
 
+void MainWindow::logToRepo(const QString &name, const QString &message)
+{
+    svnsync::LogStore::append(name, message, m_manager->config().maxLogsPerRepo);
+    if (RepoDetailPage *page = pageFor(name))
+        page->appendLog(message);
+}
+
 void MainWindow::onConflictDetected(const QString &name, const QStringList &paths)
 {
-    const QString text = QStringLiteral("仓库「%1」有 %2 个文件冲突：\n%3")
-        .arg(name).arg(paths.size()).arg(paths.join(QLatin1Char('\n')));
+    logToRepo(name, QStringLiteral("[冲突] %1 个文件：%2")
+              .arg(paths.size()).arg(paths.join(QStringLiteral(", "))));
+    svnsync::SyncEngine *engine = m_manager->engine(name);
+    if (!engine)
+        return;
+    ConflictDialog dlg(engine, paths, this);
+    dlg.exec();
     if (RepoDetailPage *page = pageFor(name))
-        page->appendLog(QStringLiteral("[冲突] %1 个文件：%2")
-                        .arg(paths.size()).arg(paths.join(QStringLiteral(", "))));
-    QMessageBox::warning(this, QStringLiteral("SVN 冲突"), text);
+        page->refreshFiles();
+}
+
+void MainWindow::scanConflicts(const QString &name)
+{
+    const auto *repo = m_manager->repository(name);
+    if (!repo)
+        return;
+    svnsync::SyncEngine *engine = m_manager->engine(name);
+    if (!engine) {
+        logToRepo(name, QStringLiteral("仓库已停用，无法扫描冲突。"));
+        return;
+    }
+    svnsync::CommandItem item;
+    item.command = svnsync::Command::GetConflictedFiles;
+    item.path = repo->path;
+    engine->submit(item, [this, name](const svnsync::CommandResult &r) {
+        QStringList paths;
+        if (r.success && !r.value.isEmpty()) {
+            const QStringList parts = r.value.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+            for (const QString &p : parts)
+                paths.append(QString::fromUtf8(p.toUtf8()));
+        }
+        if (!paths.isEmpty()) {
+            onConflictDetected(name, paths);
+        } else {
+            logToRepo(name, QStringLiteral("没有发现冲突文件。"));
+        }
+    });
 }
 
 RepoDetailPage *MainWindow::pageFor(const QString &name)
@@ -209,6 +328,7 @@ RepoDetailPage *MainWindow::pageFor(const QString &name)
 
     auto *page = new RepoDetailPage(m_pages);
     page->setRepository(*repo);
+    page->setLogHistory(svnsync::LogStore::history(name, m_manager->config().maxLogsPerRepo));
     if (repo->running())
         page->setEngine(m_manager->engine(name));
 
@@ -228,10 +348,20 @@ RepoDetailPage *MainWindow::pageFor(const QString &name)
     connect(page, &RepoDetailPage::removeRequested, this, [this, name] {
         onRemoveRequested(name);
     });
-    connect(page, &RepoDetailPage::openInExplorerRequested, this, [this, name] {
-        const auto *r = m_manager->repository(name);
-        if (r)
-            QDesktopServices::openUrl(QUrl::fromLocalFile(r->path));
+    connect(page, &RepoDetailPage::configureRequested, this, [this, name] {
+        const auto *repo = m_manager->repository(name);
+        if (!repo)
+            return;
+        AddRepoDialog dialog(true, this);
+        dialog.setRepository(*repo);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        const auto updated = dialog.repository();
+        m_manager->setCredentials(name, updated.username, updated.password);
+        logToRepo(name, QStringLiteral("已更新仓库凭据。"));
+    });
+    connect(page, &RepoDetailPage::conflictScanRequested, this, [this, name] {
+        scanConflicts(name);
     });
 
     m_pagesByRepo.insert(name, page);

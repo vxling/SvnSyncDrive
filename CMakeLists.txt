@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Widgets Network)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Widgets Network Sql)
 
 if(NOT DEFINED LIBSVNPLUS_ROOT)
     set(LIBSVNPLUS_ROOT "C:/Users/xuser/Documents/LibSVNPlus/build/_stage"
@@ -36,14 +36,20 @@ add_library(svnsync_core STATIC
     src/core/SyncEngine.cpp
     src/core/RepoManager.cpp
     src/core/ConfigStore.cpp
+    src/core/LogStore.cpp
+    src/core/AppLog.cpp
     src/core/Repository.h
     src/core/SvnCommand.h
+    src/core/GlobalConfig.h
     src/core/ICommandRunner.h
     src/core/SvnWorker.h
     src/core/RepoWatcher.h
     src/core/SyncEngine.h
     src/core/RepoManager.h
     src/core/ConfigStore.h
+    src/core/LogStore.h
+    src/core/AppLog.h
+    src/core/AppPaths.h
 )
 
 target_include_directories(svnsync_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -52,7 +58,7 @@ target_include_directories(svnsync_core PUBLIC
     "${LIBSVNPLUS_ROOT}/include/subversion-1"
 )
 target_compile_definitions(svnsync_core PUBLIC SVNPLUS_STATIC)
-target_link_libraries(svnsync_core PUBLIC Qt6::Core PRIVATE ${SVNPLUS_LIBS})
+target_link_libraries(svnsync_core PUBLIC Qt6::Core Qt6::Sql PRIVATE ${SVNPLUS_LIBS})
 
 # Copies the libsvn runtime DLLs next to a target so it can start standalone.
 function(copy_libsvn_runtime_dlls TARGET)
@@ -106,6 +112,12 @@ add_executable(svnsyncdrive
     src/ui/FileBrowser.h
     src/ui/AddRepoDialog.cpp
     src/ui/AddRepoDialog.h
+    src/ui/AboutDialog.cpp
+    src/ui/AboutDialog.h
+    src/ui/ConflictDialog.cpp
+    src/ui/ConflictDialog.h
+    src/ui/SettingsDialog.cpp
+    src/ui/SettingsDialog.h
 )
 
 target_link_libraries(svnsyncdrive PRIVATE
@@ -121,8 +133,3 @@ add_executable(synccoretest tests/coretest/main.cpp)
 target_link_libraries(synccoretest PRIVATE svnsync_core)
 copy_libsvn_runtime_dlls(synccoretest)
 deploy_qt(synccoretest)
-
-# ── temporary diagnostics ─────────────────────────────────────────────────
-add_executable(diagmanager tests/diagmanager/main.cpp)
-target_link_libraries(diagmanager PRIVATE svnsync_core)
-copy_libsvn_runtime_dlls(diagmanager)

@@ -5,10 +5,12 @@
 #include <QHash>
 #include <QMainWindow>
 #include <QStackedWidget>
+#include <QStringList>
 
 #include <memory>
 
 class QLabel;
+class QSystemTrayIcon;
 class RepoListPanel;
 class RepoDetailPage;
 
@@ -34,8 +36,15 @@ private:
     void onStateChanged(const QString &name, svnsync::RepoState state);
     void onRemoveRequested(const QString &name);
     void onAddRequested();
+    void onSettingsRequested();
+    void showWindowFromTray();
+    void quitApplication();
+    void setupTrayIcon();
+    void closeEvent(QCloseEvent *event) override;
     void showNotification(const QString &name, const QString &message);
+    void logToRepo(const QString &name, const QString &message);
     void onConflictDetected(const QString &name, const QStringList &paths);
+    void scanConflicts(const QString &name);
     RepoDetailPage *pageFor(const QString &name);
     void setGlobalStatus(const QString &text);
 
@@ -45,5 +54,6 @@ private:
     QLabel *m_emptyPage = nullptr;
     QHash<QString, RepoDetailPage *> m_pagesByRepo;
     QLabel *m_statusText = nullptr;
+    QSystemTrayIcon *m_trayIcon = nullptr;
     QString m_selectedName;
 };

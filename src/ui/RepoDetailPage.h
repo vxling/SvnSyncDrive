@@ -2,11 +2,11 @@
 
 #include "core/Repository.h"
 
+#include <QStringList>
 #include <QWidget>
 
 class QLabel;
 class QPlainTextEdit;
-class QPushButton;
 
 namespace svnsync {
 class SyncEngine;
@@ -31,6 +31,7 @@ public:
     void setEngine(svnsync::SyncEngine *engine);
     void setState(svnsync::RepoState state);
     void appendLog(const QString &message);
+    void setLogHistory(const QStringList &lines);
     void refreshFiles();
 
     QString repoName() const { return m_name; }
@@ -38,18 +39,16 @@ public:
 signals:
     void syncRequested();
     void toggleStateRequested();
+    void configureRequested();
     void removeRequested();
-    void openInExplorerRequested();
+    void conflictScanRequested();
 
 private:
     QString m_name;
     svnsync::RepoState m_state = svnsync::RepoState::Deactive;
 
     QLabel *m_nameLabel = nullptr;
-    QLabel *m_urlLabel = nullptr;
-    QLabel *m_pathLabel = nullptr;
     QLabel *m_stateLabel = nullptr;
-    QPushButton *m_toggleButton = nullptr;
     QPlainTextEdit *m_log = nullptr;
     FileBrowser *m_browser = nullptr;
 };

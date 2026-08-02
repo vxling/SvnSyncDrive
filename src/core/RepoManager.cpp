@@ -1,6 +1,7 @@
 #include "core/RepoManager.h"
 
 #include "core/ConfigStore.h"
+#include "core/LogStore.h"
 #include "core/SyncEngine.h"
 
 namespace svnsync {
@@ -14,7 +15,9 @@ RepoManager::~RepoManager() = default;
 
 void RepoManager::load()
 {
+    ConfigStore::initialize();
     m_repos = ConfigStore::loadRepositories();
+    m_config = ConfigStore::loadGlobalConfig();
     for (const auto &repo : m_repos)
         if (repo.running())
             startEngine(repo.name);
@@ -56,6 +59,7 @@ void RepoManager::removeRepository(const QString &name)
         return;
     stopEngine(name);
     m_repos.removeAt(i);
+    LogStore::clearRepository(name);
     persist();
     emit repositoryListChanged();
 }
@@ -85,6 +89,27 @@ void RepoManager::syncNow(const QString &name)
         e->syncNow();
 }
 
+void RepoManager::setCredentials(const QString &name, const QString &username,
+                                 const QString &password)
+{
+    const int i = indexOf(name);
+    if (i < 0)
+        return;
+    m_repos[i].username = username;
+    m_repos[i].password = password;
+    persist();
+    if (SyncEngine *e = engine(name))
+        e->setCredentials(username, password);
+}
+
+void RepoManager::setConfig(const GlobalConfig &config)
+{
+    m_config = config;
+    ConfigStore::saveGlobalConfig(config);
+    for (auto &entry : m_engines)
+        entry.second->setConfig(config);
+}
+
 int RepoManager::indexOf(const QString &name) const
 {
     for (int i = 0; i < m_repos.size(); ++i)
@@ -107,6 +132,7 @@ void RepoManager::startEngine(const QString &name)
         return;
 
     auto engine = std::make_unique<SyncEngine>(m_repos.at(i));
+    engine->setConfig(m_config);
     const QString repoName = name;  // captured by value for lambdas
 
     connect(engine.get(), &SyncEngine::syncNotification, this,

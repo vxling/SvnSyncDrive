@@ -1,5 +1,6 @@
 #include "core/SvnWorker.h"
 
+#include "core/AppLog.h"
 #include "core/ICommandRunner.h"
 
 #include <svnplus/SvnClient.h>
@@ -11,6 +12,32 @@ namespace {
 QString errorText(const SvnPlus::SvnError &err)
 {
     return QString::fromStdString(err.message());
+}
+
+QString commandName(Command command)
+{
+    switch (command) {
+    case Command::Info: return QStringLiteral("info");
+    case Command::Status: return QStringLiteral("status");
+    case Command::GetRevision: return QStringLiteral("get-revision");
+    case Command::GetHeadRevision: return QStringLiteral("get-head-revision");
+    case Command::GetConflictedFiles: return QStringLiteral("get-conflicted-files");
+    case Command::GetLastChangedTime: return QStringLiteral("get-last-changed-time");
+    case Command::IsVersioned: return QStringLiteral("is-versioned");
+    case Command::IsValidWorkingCopy: return QStringLiteral("is-valid-working-copy");
+    case Command::TestConnection: return QStringLiteral("test-connection");
+    case Command::GetServerUpdatePaths: return QStringLiteral("get-server-update-paths");
+    case Command::Add: return QStringLiteral("add");
+    case Command::Delete: return QStringLiteral("delete");
+    case Command::Move: return QStringLiteral("move");
+    case Command::Revert: return QStringLiteral("revert");
+    case Command::Resolve: return QStringLiteral("resolve");
+    case Command::BreakLock: return QStringLiteral("break-lock");
+    case Command::Commit: return QStringLiteral("commit");
+    case Command::Update: return QStringLiteral("update");
+    case Command::Checkout: return QStringLiteral("checkout");
+    }
+    return QStringLiteral("unknown");
 }
 
 StatusKind toStatusKind(SvnPlus::SvnStatusKind kind)
@@ -89,7 +116,7 @@ private:
     {
         std::vector<SvnPlus::SvnStatus> statuses;
         SvnPlus::SvnStatusOptions opts;
-        opts.depth = SvnPlus::SvnDepth::Infinity;
+        opts.depth = static_cast<SvnPlus::SvnDepth>(static_cast<int>(item.statusDepth));
         opts.checkOutOfDate = item.checkOutOfDate;
 
         const SvnPlus::SvnError err =
@@ -118,9 +145,15 @@ private:
 
     void runInfo(const CommandItem &item, CommandResult &result)
     {
+        runInfoRev(item, result, SvnPlus::SvnRevision::head());
+    }
+
+    void runInfoRev(const CommandItem &item, CommandResult &result,
+                    const SvnPlus::SvnRevision &revision)
+    {
         std::vector<SvnPlus::SvnInfo> infos;
         const SvnPlus::SvnError err = m_client.info(
-            item.path.toStdString(), infos, SvnPlus::SvnRevision::head(),
+            item.path.toStdString(), infos, revision,
             SvnPlus::SvnDepth::Infinity, false);
         if (!err.ok()) {
             result = fail(item, err);
@@ -142,7 +175,10 @@ private:
 
     void runGetRevision(const CommandItem &item, CommandResult &result)
     {
-        runInfo(item, result);
+        // Report the working copy's own revision, not the server HEAD: a HEAD
+        // query on a WC path returns the URL's HEAD info, which would make the
+        // engine believe it is always up to date and never pull remote changes.
+        runInfoRev(item, result, SvnPlus::SvnRevision::working());
     }
 
     void runGetHeadRevision(const CommandItem &item, CommandResult &result)
@@ -201,11 +237,21 @@ private:
         const SvnPlus::SvnError err = m_client.info(
             item.repoUrl.toStdString(), infos, SvnPlus::SvnRevision::head(),
             SvnPlus::SvnDepth::Empty, false);
-        result = err.ok() ? makeResult(item, true) : fail(item, err);
+        if (!err.ok()) {
+            result = fail(item, err);
+            return;
+        }
+        result = makeResult(item, true);
+        if (!infos.empty())
+            result.revision = infos.front().revision;
     }
 
     void runGetServerUpdatePaths(const CommandItem &item, CommandResult &result)
     {
+        // `svn status -u` against HEAD: report every path that has remote
+        // changes (including nodes that exist only in the repository). The
+        // libsvnplus status call must compare against HEAD for this to work;
+        // a WORKING comparison misses pure remote additions entirely.
         CommandItem remote = item;
         remote.checkOutOfDate = true;
         runStatus(remote, result);
@@ -432,6 +478,7 @@ void SvnWorker::workerLoop()
             std::lock_guard<std::mutex> lk(m_mutex);
             removeFromDedupLocked(item);
         }
+        logModify(item, result);
         emit resultReady(item.id, result);
     }
 
@@ -450,7 +497,7 @@ CommandItem SvnWorker::takeNextLocked()
 
 bool SvnWorker::heavyWriteAllowedLocked(const CommandItem &item)
 {
-    if (item.command == Command::Checkout)
+    if (item.command == Command::Checkout || item.bypassDedup)
         return true;
     const QString key = dedupKey(item);
     const auto it = m_dedup.constFind(key);
@@ -481,6 +528,34 @@ QString SvnWorker::dedupKey(const CommandItem &item) const
         key += QLatin1Char('|') + sorted.join(QLatin1Char(','));
     }
     return key;
+}
+
+void SvnWorker::logModify(const CommandItem &item, const CommandResult &result)
+{
+    // Only working-copy modifying commands are recorded in the program log.
+    if (categoryOf(item.command) == Category::ReadOnly)
+        return;
+
+    QString message = commandName(item.command);
+    if (!item.repo.isEmpty())
+        message += QStringLiteral(" repo=") + item.repo;
+    if (!item.path.isEmpty())
+        message += QStringLiteral(" path=") + item.path;
+    if (item.command == Command::Update && !item.updatePaths.isEmpty())
+        message += QStringLiteral(" paths=") + item.updatePaths.join(QLatin1Char(';'));
+    if (item.command == Command::Commit && !item.message.isEmpty())
+        message += QStringLiteral(" message=") + item.message;
+
+    if (result.success) {
+        if (result.revision > 0)
+            message += QStringLiteral(" -> ok r%1").arg(result.revision);
+        else
+            message += QStringLiteral(" -> ok");
+        AppLog::info(message);
+    } else {
+        message += QStringLiteral(" -> failed: ") + result.error;
+        AppLog::error(message);
+    }
 }
 
 } // namespace svnsync

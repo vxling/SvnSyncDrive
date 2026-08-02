@@ -1,5 +1,6 @@
 #include "core/ConfigStore.h"
 #include "core/ICommandRunner.h"
+#include "core/LogStore.h"
 #include "core/RepoWatcher.h"
 #include "core/Repository.h"
 #include "core/SvnCommand.h"
@@ -199,6 +200,36 @@ static bool testWorkerDedup()
     return true;
 }
 
+static bool testWorkerDedupBypass()
+{
+    std::printf("-- SvnWorker dedup bypass --\n");
+    WorkerAndFake wf;
+
+    // Baseline: a plain Update with the same key is suppressed.
+    wf.worker->submit(makeItem(Command::Update, QStringLiteral("/wc")));
+    wf.worker->submit(makeItem(Command::Update, QStringLiteral("/wc")));
+
+    // A bypassDedup Update (the 15-min fullSync one) on that same key must
+    // run anyway: suppressing it would leave SyncEngine::fullSync waiting
+    // forever for a result it never gets (m_fullSyncing stuck = dead).
+    CommandItem scheduled = makeItem(Command::Update, QStringLiteral("/wc"));
+    scheduled.bypassDedup = true;
+    wf.worker->submit(scheduled);
+
+    const auto results = collectResults(*wf.worker, 2);
+    check(results.size() == 2,
+          "bypassDedup update runs despite a queued same-key update");
+
+    int updates = 0;
+    for (const auto &r : results)
+        if (r.command == Command::Update)
+            ++updates;
+    check(updates == 2, "both same-key updates executed serially");
+
+    wf.worker->stop();
+    return true;
+}
+
 static bool testWorkerResultCorrelation()
 {
     std::printf("-- SvnWorker result correlation --\n");
@@ -273,6 +304,42 @@ static bool testRepoWatcher()
 
     watcher.stop();
     check(!watcher.isWatching(), "watcher stops cleanly");
+    return true;
+}
+
+static bool testLogStore()
+{
+    std::printf("-- LogStore persistence --\n");
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    const QString dbFile = dir.path() + QStringLiteral("/logs.db");
+    LogStore::setDatabaseFileForTest(dbFile);
+
+    LogStore::append(QStringLiteral("alpha"), QStringLiteral("first"), 3);
+    LogStore::append(QStringLiteral("beta"), QStringLiteral("hello"), 3);
+    LogStore::append(QStringLiteral("alpha"), QStringLiteral("second"), 3);
+    LogStore::append(QStringLiteral("alpha"), QStringLiteral("third"), 3);
+    LogStore::append(QStringLiteral("alpha"), QStringLiteral("fourth"), 3);
+
+    const QStringList alpha = LogStore::history(QStringLiteral("alpha"));
+    check(alpha.size() == 3, "per-repo cap prunes oldest entries");
+    check(alpha.last().contains(QStringLiteral("fourth")), "newest entry is kept");
+
+    const QStringList beta = LogStore::history(QStringLiteral("beta"));
+    check(beta.size() == 1 && beta.first().contains(QStringLiteral("hello")),
+          "other repo unaffected by pruning");
+
+    // Reopen from the same file (simulates an app restart).
+    LogStore::setDatabaseFileForTest(dbFile);
+    const QStringList again = LogStore::history(QStringLiteral("alpha"));
+    check(again == alpha, "log survives restart (persisted on disk)");
+
+    LogStore::clearRepository(QStringLiteral("alpha"));
+    check(LogStore::history(QStringLiteral("alpha")).isEmpty(),
+          "removing a repo clears its log");
+    check(LogStore::history(QStringLiteral("beta")).size() == 1,
+          "other repo log kept after clear");
     return true;
 }
 
@@ -375,6 +442,126 @@ static bool runLiveRepo(const QString &wc, const QString &url,
     return committed && committed2;
 }
 
+static bool runLiveSync(const QString &url, const QString &wcApp, const QString &wcOther)
+{
+    std::printf("-- live sync round-trip (%s) --\n", qPrintable(url));
+    if (!QDir(wcApp).exists() || !QDir(wcOther).exists()) {
+        std::printf("  [FAIL] working copies do not exist: %s / %s\n",
+                    qPrintable(wcApp), qPrintable(wcOther));
+        ++g_failures;
+        return false;
+    }
+
+    Repository repo;
+    repo.name = QStringLiteral("live");
+    repo.path = wcApp;
+    repo.url = url;
+
+    SyncEngine engine(repo);
+    QStringList notifications;
+    int fileChangeCount = 0;
+    QObject::connect(&engine, &SyncEngine::syncNotification, &engine,
+                     [&notifications](const QString &m) { notifications.append(m); });
+    QObject::connect(&engine, &SyncEngine::filesChanged, &engine,
+                     [&fileChangeCount]() { ++fileChangeCount; });
+
+    // Fast polling so the downward sync is detected within the test window.
+    GlobalConfig cfg;
+    cfg.pollIntervalMs = 1000;
+    cfg.fullSyncIntervalMs = 5 * 60 * 1000;
+    engine.setConfig(cfg);
+    engine.start();
+
+    // A second client that stands in for "another user" (and verifies the
+    // app working copy from the outside).
+    SvnPlus::SvnClient other;
+    auto committed = [&other](const QString &path) {
+        std::vector<SvnPlus::SvnInfo> infos;
+        const SvnPlus::SvnError err =
+            other.info(path.toStdString(), infos, SvnPlus::SvnRevision::head(),
+                       SvnPlus::SvnDepth::Empty);
+        return err.ok() && !infos.empty()
+            && infos[0].schedule == SvnPlus::SvnSchedule::Normal
+            && infos[0].revision >= 1;
+    };
+
+    // 1) Upward: add a file in the app working copy; the engine must
+    //    auto-add and commit it.
+    const QString up = wcApp + QStringLiteral("/auto_up_%1.txt")
+        .arg(QDateTime::currentMSecsSinceEpoch());
+    writeFile(up, "hello from the app\n");
+    std::printf("  added app file: %s\n", qPrintable(up));
+    const bool upOk = waitUntil([&] { return committed(up); }, 30000);
+    check(upOk, "upward: new file auto-added and committed by the engine");
+
+    // 2) Downward: another user adds+commits in wcOther; the engine must
+    //    pull the change into wcApp.
+    const QString down = wcOther + QStringLiteral("/other_down_%1.txt")
+        .arg(QDateTime::currentMSecsSinceEpoch());
+    writeFile(down, "hello from another user\n");
+    SvnPlus::SvnError err = other.add(down.toStdString(), SvnPlus::SvnDepth::Empty,
+                                      /*force*/ false, /*noIgnore*/ false,
+                                      /*addParents*/ false);
+    if (err.ok()) {
+        SvnPlus::SvnCommitInfo info;
+        err = other.commit({ down.toStdString() },
+                           QStringLiteral("another user commit").toStdString(),
+                           /*keepLocks*/ false, &info);
+    }
+    if (!err.ok()) {
+        std::printf("  [FAIL] another-user commit failed: %s\n",
+                    qPrintable(QString::fromStdString(err.message())));
+        ++g_failures;
+        engine.stop();
+        return false;
+    }
+    std::printf("  other user committed: %s\n", qPrintable(down));
+
+    const QString inApp = wcApp + QStringLiteral("/") + QFileInfo(down).fileName();
+    const bool downOk = waitUntil([&] { return QFileInfo::exists(inApp) && committed(inApp); },
+                                  30000);
+    check(downOk, "downward: remote commit pulled into the app working copy");
+
+    // 3) Downward (deep tree): another user adds a brand-new nested directory
+    //    tree in wcOther. svn status -u reports every intermediate level, and
+    //    the engine must not run svn update on non-existent targets (which
+    //    fails with E155007 "None of the targets are working copies").
+    const QString deepRoot = wcOther + QStringLiteral("/deep_a/deep_b/deep_c");
+    const QString deepFile = deepRoot + QStringLiteral("/deep_%1.txt")
+        .arg(QDateTime::currentMSecsSinceEpoch());
+    QDir().mkpath(deepRoot);
+    writeFile(deepFile, "nested from another user\n");
+    err = other.add(deepRoot.toStdString(), SvnPlus::SvnDepth::Infinity,
+                    /*force*/ false, /*noIgnore*/ false, /*addParents*/ true);
+    if (err.ok()) {
+        SvnPlus::SvnCommitInfo info;
+        err = other.commit({ (wcOther + QStringLiteral("/deep_a")).toStdString() },
+                           QStringLiteral("another user deep commit").toStdString(),
+                           /*keepLocks*/ false, &info);
+    }
+    if (!err.ok()) {
+        std::printf("  [FAIL] another-user deep commit failed: %s\n",
+                    qPrintable(QString::fromStdString(err.message())));
+        ++g_failures;
+        engine.stop();
+        return false;
+    }
+    std::printf("  other user committed (deep): %s\n", qPrintable(deepFile));
+
+    const QString deepInApp = wcApp + QStringLiteral("/deep_a/deep_b/deep_c/")
+        + QFileInfo(deepFile).fileName();
+    const bool deepDownOk = waitUntil(
+        [&] { return QFileInfo::exists(deepInApp) && committed(deepInApp); }, 30000);
+    check(deepDownOk, "downward: nested remote tree pulled into the app working copy");
+
+    std::printf("  notifications (%d):\n", int(notifications.size()));
+    for (const auto &n : notifications)
+        std::printf("    %s\n", qPrintable(n));
+
+    engine.stop();
+    return upOk && downOk && deepDownOk;
+}
+
 int main(int argc, char *argv[])
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -383,8 +570,10 @@ int main(int argc, char *argv[])
     testCategoryOf();
     testWorkerOrdering();
     testWorkerDedup();
+    testWorkerDedupBypass();
     testWorkerResultCorrelation();
     testRepoWatcher();
+    testLogStore();
 
     // Optional live validation: synccoretest --live <wc> <url> [user] [pass]
     const QStringList args = QCoreApplication::arguments();
@@ -393,6 +582,33 @@ int main(int argc, char *argv[])
         const QString user = idx + 3 < args.size() ? args.at(idx + 3) : QString();
         const QString pass = idx + 4 < args.size() ? args.at(idx + 4) : QString();
         runLiveRepo(args.at(idx + 1), args.at(idx + 2), user, pass);
+    }
+
+    // Two-way live sync: synccoretest --livesync <url> <wc-app> <wc-other>
+    const int syncIdx = args.indexOf(QStringLiteral("--livesync"));
+    if (syncIdx >= 0 && syncIdx + 3 < args.size()) {
+        runLiveSync(args.at(syncIdx + 1), args.at(syncIdx + 2), args.at(syncIdx + 3));
+    }
+
+    // Probe: synccoretest --probestatus <wc-path> [outOfDate] [depth]
+    const int probeIdx = args.indexOf(QStringLiteral("--probestatus"));
+    if (probeIdx >= 0 && probeIdx + 1 < args.size()) {
+        SvnPlus::SvnClient client;
+        SvnPlus::SvnStatusOptions opts;
+        const QString oodArg = probeIdx + 2 < args.size() ? args.at(probeIdx + 2) : QStringLiteral("1");
+        const QString depthArg = probeIdx + 3 < args.size() ? args.at(probeIdx + 3) : QStringLiteral("3");
+        opts.checkOutOfDate = oodArg == QStringLiteral("1");
+        opts.depth = static_cast<SvnPlus::SvnDepth>(depthArg.toInt());
+        std::vector<SvnPlus::SvnStatus> statuses;
+        const SvnPlus::SvnError err = client.status(args.at(probeIdx + 1).toStdString(), statuses, opts);
+        std::printf("probe status err=%s count=%zu\n",
+                    err.ok() ? "ok" : err.message().c_str(), statuses.size());
+        for (const auto &s : statuses) {
+            if (opts.checkOutOfDate)
+                std::printf("probe   %s ood=%d rev=%lld kind=%d node=%d\n",
+                            s.localAbspath.c_str(), int(s.outOfDate), s.revision,
+                            int(s.kind), int(s.nodeStatus));
+        }
     }
 
     std::printf("==== %s: %d failure(s) ====\n",

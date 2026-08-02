@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/GlobalConfig.h"
 #include "core/Repository.h"
 #include "core/SvnCommand.h"
 
@@ -25,10 +26,12 @@ class RepoWatcher;
  * status scan auto-adds unversioned files and commits versioned changes
  * grouped by directory (deepest first).
  *
- * Downward (server -> local): a poll timer compares the working copy
+ * Downward (server -> local): the poll timer compares the working copy
  * revision with the server HEAD; when the server is newer, remote-changed
- * paths are merged into parent directories and updated deepest-first.
- * Conflicts are reported but never auto-resolved.
+ * paths (via GetServerUpdatePaths) are merged into parent directories and
+ * updated deepest-first. The 15-min full sync instead updates the whole
+ * working copy in one pass, then runs a full upward scan. Conflicts are
+ * reported but never auto-resolved.
  *
  * The engine lives on the GUI thread; all SVN calls happen on the
  * SvnWorker thread, and results are marshalled back through queued
@@ -45,6 +48,13 @@ public:
     void start();
     void stop();
     void syncNow();
+
+    /** Apply (new) global settings: timer intervals, auto-add, TLS trust. */
+    void setConfig(const GlobalConfig &config);
+
+    /** Refresh the username/password used for every SVN call, e.g. after the
+     *  user changed their password. */
+    void setCredentials(const QString &username, const QString &password);
 
     const Repository &repository() const { return m_repo; }
 
@@ -96,6 +106,7 @@ private:
     void notify(const QString &message);
 
     Repository m_repo;
+    GlobalConfig m_config;
     std::unique_ptr<SvnWorker> m_worker;
     std::unique_ptr<RepoWatcher> m_watcher;
 
@@ -109,9 +120,16 @@ private:
     bool m_scanning = false;
     bool m_rescanPending = false;
     bool m_polling = false;
+    bool m_fullSyncing = false;
     QSet<QString> m_pendingCommits;
     QSet<QString> m_pendingAdds;
     int m_pendingUpdates = 0;
+
+    // Highest revision this engine has committed locally. A local commit
+    // bumps the server HEAD but not the working-copy root node's revision,
+    // so the poll must consider it when deciding whether the server is
+    // "newer"; otherwise it would pull down its own changes on the next poll.
+    qlonglong m_lastLocalRev = 0;
 };
 
 } // namespace svnsync
