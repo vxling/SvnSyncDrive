@@ -35,7 +35,7 @@ jobs:
 
       - name: Build, test and package
         run: |
-          export QT_ROOT="$HOME/qt/6.8.3/clang_64"
+          export QT_ROOT="$HOME/qt/6.8.3/macos"
           export SVN_STAGE="$HOME/stage/libsvnplus-0.0.0-macos-arm64"
           bash scripts/publish-macos.sh
 
