@@ -70,8 +70,20 @@ signals:
     void filesChanged();
     void conflictDetected(const QStringList &conflictedPaths);
 
+    // Server-health classification of remote command results (see classify()).
+    void authenticationFailed();   // auth error -> engine will be stopped
+    void connectionLost();         // threshold of consecutive failures reached
+    void connectionRestored();     // a server command succeeded again
+
 private:
     void onResult(quint64 id, const CommandResult &result);
+
+    /** Classify a finished command's result for the server-health signals.
+     *  Only server-touching commands are considered; local commands are
+     *  ignored. Called last in onResult: on an auth failure the engine may
+     *  be destroyed by the receiver, so callers must not touch `this`
+     *  afterwards. */
+    void classify(const CommandResult &result);
 
     // Upward sync.
     void onWatcherBatch(const QStringList &paths);
@@ -134,6 +146,10 @@ private:
     // so the poll must consider it when deciding whether the server is
     // "newer"; otherwise it would pull down its own changes on the next poll.
     qlonglong m_lastLocalRev = 0;
+
+    // Server-health bookkeeping (see classify()).
+    int m_consecutiveServerFailures = 0;
+    bool m_connectionLost = false;
 };
 
 } // namespace svnsync

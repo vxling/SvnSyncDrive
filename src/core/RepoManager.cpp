@@ -273,6 +273,12 @@ void RepoManager::startEngine(const QString &name)
             [this, repoName]() { emit filesChanged(repoName); });
     connect(engine.get(), &SyncEngine::conflictDetected, this,
             [this, repoName](const QStringList &p) { emit conflictDetected(repoName, p); });
+    connect(engine.get(), &SyncEngine::authenticationFailed, this,
+            [this, repoName]() { markAuthFailed(repoName); });
+    connect(engine.get(), &SyncEngine::connectionLost, this,
+            [this, repoName]() { markDisconnected(repoName); });
+    connect(engine.get(), &SyncEngine::connectionRestored, this,
+            [this, repoName]() { clearDisconnected(repoName); });
 
     engine->start();
     m_engines.emplace(name, std::move(engine));

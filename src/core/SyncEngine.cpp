@@ -17,6 +17,37 @@ bool pathLooksLikeFile(const QString &path)
     return path.section(QLatin1Char('/'), -1).contains(QLatin1Char('.'));
 }
 
+/** Consecutive server-access failures after which the repo is reported
+ *  disconnected (the engine keeps retrying on the normal poll interval). */
+constexpr int kDisconnectThreshold = 3;
+
+bool isServerCommand(Command command)
+{
+    switch (command) {
+    case Command::GetHeadRevision:
+    case Command::GetServerUpdatePaths:
+    case Command::Update:
+    case Command::Commit:
+    case Command::Checkout:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/** Best-effort detection of SVN authentication errors. The app only sees the
+ *  (English) error text from libsvn, so the match is textual; it covers the
+ *  observed "No more credentials or we tried too many times. Authentication
+ *  failed" chain and the related authorization variants. */
+bool isAuthError(const QString &error)
+{
+    const QString e = error.toLower();
+    return e.contains(QStringLiteral("no more credentials"))
+        || e.contains(QStringLiteral("authentication failed"))
+        || e.contains(QStringLiteral("authorization failed"))
+        || e.contains(QStringLiteral("not authorized"));
+}
+
 } // namespace
 
 SyncEngine::SyncEngine(const Repository &repository, QObject *parent)
@@ -118,11 +149,40 @@ quint64 SyncEngine::submit(const CommandItem &item, Callback callback)
 void SyncEngine::onResult(quint64 id, const CommandResult &result)
 {
     const auto it = m_pending.constFind(id);
-    if (it == m_pending.constEnd())
+    if (it != m_pending.constEnd()) {
+        Callback callback = it.value();
+        m_pending.erase(it);
+        callback(result);
+    }
+    // Classify last: on an auth failure RepoManager stops (and thereby
+    // destroys) this engine in response to the emitted signal, so nothing
+    // below may touch `this` afterwards.
+    classify(result);
+}
+
+void SyncEngine::classify(const CommandResult &result)
+{
+    if (!isServerCommand(result.command))
         return;
-    Callback callback = it.value();
-    m_pending.erase(it);
-    callback(result);
+    if (result.success) {
+        // Any successful server access clears the failure streak and, if the
+        // repo had been reported disconnected, restores its previous state.
+        m_consecutiveServerFailures = 0;
+        if (m_connectionLost) {
+            m_connectionLost = false;
+            emit connectionRestored();
+        }
+        return;
+    }
+    if (isAuthError(result.error)) {
+        emit authenticationFailed();
+        return;
+    }
+    ++m_consecutiveServerFailures;
+    if (!m_connectionLost && m_consecutiveServerFailures >= kDisconnectThreshold) {
+        m_connectionLost = true;
+        emit connectionLost();
+    }
 }
 
 // ───────────────────────────────────────────────────────────── upward sync ──
