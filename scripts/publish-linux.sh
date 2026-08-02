@@ -14,7 +14,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/build"
 OUT="$ROOT/build/publish"
 
-VERSION="$(sed -n 's/^project(SvnSyncDrive VERSION \([0-9.]*\)).*/\1/p' "$ROOT/CMakeLists.txt" | head -1)"
+VERSION="$(sed -n 's/^project(SvnSyncDrive VERSION \([0-9.]*\).*/\1/p' "$ROOT/CMakeLists.txt" | head -1)"
 ARCH="amd64"
 PKG_NAME="svnsyncdrive-$VERSION-linux64"
 DEB_NAME="svnsyncdrive_${VERSION}_${ARCH}"
@@ -88,8 +88,8 @@ mkdir -p "$DEB/DEBIAN" \
 
 cp "$BIN" "$DEB/usr/bin/svnsyncdrive"
 cp "$ROOT/src/resources/icon_256.png" "$DEB/usr/share/icons/hicolor/256x256/apps/svnsyncdrive.png"
-cp "$ROOT/LICENSE" "$DEB/usr/share/doc/svnsyncdrive/copyright"
-cp "$ROOT/README.md" "$DEB/usr/share/doc/svnsyncdrive/README.md"
+[ -f "$ROOT/LICENSE" ] && cp "$ROOT/LICENSE" "$DEB/usr/share/doc/svnsyncdrive/copyright"
+[ -f "$ROOT/README.md" ] && cp "$ROOT/README.md" "$DEB/usr/share/doc/svnsyncdrive/README.md"
 
 cat > "$DEB/usr/share/applications/svnsyncdrive.desktop" <<EOF
 [Desktop Entry]
