@@ -104,16 +104,29 @@ struct WorkerAndFake
     }
 };
 
-QList<CommandResult> collectResults(SvnWorker &worker, int expected)
+/**
+ * Collects results via a connection that must be created BEFORE the commands
+ * are submitted. The worker runs on a raw std::thread and can execute every
+ * queued command (and emit resultReady) before the main thread gets a chance
+ * to connect, so a connect-after-submit test would randomly miss signals.
+ */
+struct ResultCollector
 {
     QList<CommandResult> results;
     QObject context;
-    QObject::connect(&worker, &SvnWorker::resultReady, &context,
-                     [&results](quint64, const CommandResult &r) { results.append(r); },
-                     Qt::QueuedConnection);
-    waitUntil([&] { return results.size() >= expected; });
-    return results;
-}
+
+    explicit ResultCollector(SvnWorker &worker)
+    {
+        QObject::connect(&worker, &SvnWorker::resultReady, &context,
+                         [this](quint64, const CommandResult &r) { results.append(r); },
+                         Qt::QueuedConnection);
+    }
+
+    bool wait(int expected, int timeoutMs = 10000)
+    {
+        return waitUntil([&] { return results.size() >= expected; }, timeoutMs);
+    }
+};
 
 CommandItem makeItem(Command command, const QString &path)
 {
@@ -141,14 +154,15 @@ static bool testWorkerOrdering()
 {
     std::printf("-- SvnWorker ordering --\n");
     WorkerAndFake wf;
+    ResultCollector col(*wf.worker);
 
     wf.worker->submit(makeItem(Command::Commit, QStringLiteral("/a")));
     wf.worker->submit(makeItem(Command::Status, QStringLiteral("/a")));
     wf.worker->submit(makeItem(Command::Add, QStringLiteral("/b")));
     wf.worker->submit(makeItem(Command::Update, QStringLiteral("/wc")));
 
-    const auto results = collectResults(*wf.worker, 4);
-    check(results.size() == 4, "all 4 commands delivered a result");
+    check(col.wait(4), "all 4 commands delivered a result");
+    check(col.results.size() == 4, "exactly 4 results received");
 
     QList<Command> expected = { Command::Status, Command::Add, Command::Commit, Command::Update };
     check(wf.fake->order == expected, "priority order: ReadOnly -> LocalWrite -> HeavyWrite");
@@ -161,6 +175,7 @@ static bool testWorkerDedup()
 {
     std::printf("-- SvnWorker dedup --\n");
     WorkerAndFake wf;
+    ResultCollector col(*wf.worker);
 
     // Duplicate commits on the same path must collapse to one.
     wf.worker->submit(makeItem(Command::Commit, QStringLiteral("/x")));
@@ -179,13 +194,13 @@ static bool testWorkerDedup()
     wf.worker->submit(updB);
 
     // 2 commits + 2 updates = 4 results expected.
-    const auto results = collectResults(*wf.worker, 4);
-    check(results.size() == 4, "dedup collapsed 6 submits into 4 executions");
+    check(col.wait(4), "dedup collapsed 6 submits into 4 executions");
+    check(col.results.size() == 4, "exactly 4 results received");
 
     int commits = 0;
     int updatesA = 0;
     int updatesB = 0;
-    for (const auto &r : results) {
+    for (const auto &r : col.results) {
         if (r.command == Command::Commit)
             ++commits;
         else if (r.command == Command::Update) {
@@ -206,6 +221,7 @@ static bool testWorkerDedupBypass()
 {
     std::printf("-- SvnWorker dedup bypass --\n");
     WorkerAndFake wf;
+    ResultCollector col(*wf.worker);
 
     // Baseline: a plain Update with the same key is suppressed.
     wf.worker->submit(makeItem(Command::Update, QStringLiteral("/wc")));
@@ -218,12 +234,11 @@ static bool testWorkerDedupBypass()
     scheduled.bypassDedup = true;
     wf.worker->submit(scheduled);
 
-    const auto results = collectResults(*wf.worker, 2);
-    check(results.size() == 2,
-          "bypassDedup update runs despite a queued same-key update");
+    check(col.wait(2), "bypassDedup update runs despite a queued same-key update");
+    check(col.results.size() == 2, "exactly 2 results received");
 
     int updates = 0;
-    for (const auto &r : results)
+    for (const auto &r : col.results)
         if (r.command == Command::Update)
             ++updates;
     check(updates == 2, "both same-key updates executed serially");
