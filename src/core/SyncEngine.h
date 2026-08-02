@@ -72,7 +72,7 @@ signals:
 
     // Server-health classification of remote command results (see classify()).
     void authenticationFailed();   // auth error -> engine will be stopped
-    void connectionLost();         // threshold of consecutive failures reached
+    void connectionLost();         // threshold of consecutive network failures reached
     void connectionRestored();     // a server command succeeded again
 
 private:
@@ -148,7 +148,7 @@ private:
     qlonglong m_lastLocalRev = 0;
 
     // Server-health bookkeeping (see classify()).
-    int m_consecutiveServerFailures = 0;
+    int m_consecutiveNetworkFailures = 0;
     bool m_connectionLost = false;
 };
 

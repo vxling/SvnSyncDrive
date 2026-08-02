@@ -36,6 +36,12 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_maxLogsPerRepo->setToolTip(QStringLiteral("每个仓库在本地数据库中最多保留的日志条数（上限 10000 条），超出后自动丢弃最早的"));
     form->addRow(QStringLiteral("每个仓库保留日志条数"), m_maxLogsPerRepo);
 
+    m_disconnectThreshold = new QSpinBox(this);
+    m_disconnectThreshold->setRange(1, 100);
+    m_disconnectThreshold->setSuffix(QStringLiteral(" 次"));
+    m_disconnectThreshold->setToolTip(QStringLiteral("连续多少次网络访问失败后，将仓库标记为“连接断开”。任意一次成功访问都会清零重新计数"));
+    form->addRow(QStringLiteral("断网判定阈值"), m_disconnectThreshold);
+
     m_autoAdd = new QCheckBox(QStringLiteral("自动添加未纳入版本控制的新文件"), this);
     m_autoAdd->setToolTip(QStringLiteral("关闭后只提交已有版本控制的修改"));
     m_trustCert = new QCheckBox(QStringLiteral("信任自签名 / 未知证书"), this);
@@ -73,6 +79,7 @@ void SettingsDialog::setConfig(const svnsync::GlobalConfig &config)
     m_minimizeToTray->setChecked(config.minimizeToTray);
     m_startMinimizedToTray->setChecked(config.startMinimizedToTray);
     m_maxLogsPerRepo->setValue(config.maxLogsPerRepo);
+    m_disconnectThreshold->setValue(config.disconnectThreshold);
 }
 
 svnsync::GlobalConfig SettingsDialog::config() const
@@ -85,5 +92,6 @@ svnsync::GlobalConfig SettingsDialog::config() const
     config.minimizeToTray = m_minimizeToTray->isChecked();
     config.startMinimizedToTray = m_startMinimizedToTray->isChecked();
     config.maxLogsPerRepo = m_maxLogsPerRepo->value();
+    config.disconnectThreshold = m_disconnectThreshold->value();
     return config;
 }

@@ -68,7 +68,7 @@ public:
     void markAuthFailed(const QString &name);
 
     /** Set a repo to the transient Disconnected state (engine keeps running)
-     *  after kDisconnectThreshold consecutive server-access failures. */
+     *  after the configured number of consecutive network-access failures. */
     void markDisconnected(const QString &name);
 
     /** Restore a Disconnected repo to its pre-disconnect running state after

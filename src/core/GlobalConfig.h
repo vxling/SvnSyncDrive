@@ -32,6 +32,11 @@ struct GlobalConfig
 
     /** Maximum number of log lines kept per repository. */
     int maxLogsPerRepo = 10000;
+
+    /** Consecutive network-access failures (per repo) after which the repo
+     *  is marked disconnected. A single successful server command resets
+     *  the counter. */
+    int disconnectThreshold = 3;
 };
 
 } // namespace svnsync

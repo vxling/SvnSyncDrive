@@ -29,4 +29,5 @@ private:
     QCheckBox *m_minimizeToTray = nullptr;
     QCheckBox *m_startMinimizedToTray = nullptr;
     QSpinBox *m_maxLogsPerRepo = nullptr;
+    QSpinBox *m_disconnectThreshold = nullptr;
 };

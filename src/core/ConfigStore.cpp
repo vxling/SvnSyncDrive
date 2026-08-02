@@ -324,6 +324,8 @@ GlobalConfig ConfigStore::loadGlobalConfig()
             config.startMinimizedToTray = value.toInt() != 0;
         else if (key == QStringLiteral("maxLogsPerRepo"))
             config.maxLogsPerRepo = value.toInt();
+        else if (key == QStringLiteral("disconnectThreshold"))
+            config.disconnectThreshold = value.toInt();
     }
     return config;
 }
@@ -359,6 +361,7 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         put(QStringLiteral("minimizeToTray"), QString::number(config.minimizeToTray));
         put(QStringLiteral("startMinimizedToTray"), QString::number(config.startMinimizedToTray));
         put(QStringLiteral("maxLogsPerRepo"), QString::number(config.maxLogsPerRepo));
+        put(QStringLiteral("disconnectThreshold"), QString::number(config.disconnectThreshold));
     }
 
     if (ok)

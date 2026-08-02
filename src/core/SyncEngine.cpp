@@ -17,10 +17,6 @@ bool pathLooksLikeFile(const QString &path)
     return path.section(QLatin1Char('/'), -1).contains(QLatin1Char('.'));
 }
 
-/** Consecutive server-access failures after which the repo is reported
- *  disconnected (the engine keeps retrying on the normal poll interval). */
-constexpr int kDisconnectThreshold = 3;
-
 bool isServerCommand(Command command)
 {
     switch (command) {
@@ -46,6 +42,49 @@ bool isAuthError(const QString &error)
         || e.contains(QStringLiteral("authentication failed"))
         || e.contains(QStringLiteral("authorization failed"))
         || e.contains(QStringLiteral("not authorized"));
+}
+
+/** Best-effort detection of network-access errors (timeouts, refused/reset
+ *  connections, DNS failures, TLS/serf setup problems). Only these count
+ *  towards the "disconnected" state; local working-copy errors do not. */
+bool isNetworkError(const QString &error)
+{
+    const QString e = error.toLower();
+    static const char *const kPatterns[] = {
+        "unable to connect",
+        "cannot connect",
+        "can't connect",
+        "connection timed out",
+        "timed out",
+        "connection refused",
+        "actively refused",
+        "no route to host",
+        "network is unreachable",
+        "network unreachable",
+        "could not resolve host",
+        "name or service not known",
+        "host not found",
+        "unknown host",
+        "ssl setup",
+        "ssl negotiation",
+        "ssl connect",
+        "certificate verify failed",
+        "connection reset by peer",
+        "connection reset",
+        "closed by remote",
+        "server unexpectedly closed the connection",
+        "error running context",
+        "connection to server closed",
+        "bad gateway",
+        "gateway timeout",
+        "service unavailable",
+        "could not contact proxy",
+    };
+    for (const char *pattern : kPatterns) {
+        if (e.contains(QLatin1String(pattern)))
+            return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -167,7 +206,7 @@ void SyncEngine::classify(const CommandResult &result)
     if (result.success) {
         // Any successful server access clears the failure streak and, if the
         // repo had been reported disconnected, restores its previous state.
-        m_consecutiveServerFailures = 0;
+        m_consecutiveNetworkFailures = 0;
         if (m_connectionLost) {
             m_connectionLost = false;
             emit connectionRestored();
@@ -178,8 +217,14 @@ void SyncEngine::classify(const CommandResult &result)
         emit authenticationFailed();
         return;
     }
-    ++m_consecutiveServerFailures;
-    if (!m_connectionLost && m_consecutiveServerFailures >= kDisconnectThreshold) {
+    // Only network-access errors prove the server is unreachable; local
+    // working-copy problems (e.g. "None of the targets are working copies")
+    // must not flip the repo into the disconnected state.
+    if (!isNetworkError(result.error))
+        return;
+    const int threshold = qMax(1, m_config.disconnectThreshold);
+    ++m_consecutiveNetworkFailures;
+    if (!m_connectionLost && m_consecutiveNetworkFailures >= threshold) {
         m_connectionLost = true;
         emit connectionLost();
     }
