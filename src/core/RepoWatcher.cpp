@@ -205,6 +205,18 @@ void RepoWatcher::run()
     // Portable fallback (Linux / macOS): watch the directory tree with
     // QFileSystemWatcher. QFileSystemWatcher does not recurse, so subdirectories
     // are added up front and re-scanned whenever a directory changes.
+    //
+    // QFileSystemWatcher is powered by a QSocketNotifier that only registers
+    // with a Qt event dispatcher already present in the current thread. This
+    // thread is a plain std::thread, which has none, and processEvents() will
+    // not create one - only QEventLoop::exec() does. Run one boot-loop
+    // iteration first so the watcher's notifier is actually enabled.
+    {
+        QEventLoop boot;
+        QMetaObject::invokeMethod(&boot, &QEventLoop::quit, Qt::QueuedConnection);
+        boot.exec();
+    }
+
     const auto onFsEvent = [this](const QString &path) {
         const QString normalized = QDir::fromNativeSeparators(path);
         if (!shouldIgnore(normalized) && !m_suspended.load())
