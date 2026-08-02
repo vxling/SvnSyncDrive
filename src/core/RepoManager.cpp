@@ -18,9 +18,7 @@ void RepoManager::load()
     ConfigStore::initialize();
     m_repos = ConfigStore::loadRepositories();
     m_config = ConfigStore::loadGlobalConfig();
-    for (const auto &repo : m_repos)
-        if (repo.running())
-            startEngine(repo.name);
+    enforceLimit();
     emit repositoryListChanged();
 }
 
@@ -45,9 +43,14 @@ void RepoManager::addRepository(const Repository &repo)
 {
     if (indexOf(repo.name) >= 0)
         return;
-    m_repos.append(repo);
+    // A newly added repo is expected to be used: put it at the top of the
+    // list so it is monitored (bumping the 5th one out if needed). A repo
+    // added disabled goes to the bottom.
     if (repo.running())
-        startEngine(repo.name);
+        m_repos.prepend(repo);
+    else
+        m_repos.append(repo);
+    enforceLimit();
     persist();
     emit repositoryListChanged();
 }
@@ -60,6 +63,7 @@ void RepoManager::removeRepository(const QString &name)
     stopEngine(name);
     m_repos.removeAt(i);
     LogStore::clearRepository(name);
+    enforceLimit();
     persist();
     emit repositoryListChanged();
 }
@@ -69,6 +73,10 @@ void RepoManager::setState(const QString &name, RepoState state)
     const int i = indexOf(name);
     if (i < 0)
         return;
+    // A repository beyond the monitoring limit cannot be started directly;
+    // only promote() moves it back into the top-kMaxMonitoredRepos slots.
+    if (state != RepoState::Deactive && i >= kMaxMonitoredRepos)
+        state = RepoState::Deactive;
     if (m_repos[i].state == state)
         return;
     m_repos[i].state = state;
@@ -80,6 +88,65 @@ void RepoManager::setState(const QString &name, RepoState state)
 
     persist();
     emit repositoryStateChanged(name, state);
+}
+
+void RepoManager::promote(const QString &name)
+{
+    const int i = indexOf(name);
+    if (i < 0)
+        return;
+    const bool moved = i != 0;
+    if (moved) {
+        Repository repo = m_repos.takeAt(i);
+        m_repos.prepend(repo);
+    }
+    const bool statesChanged = enforceLimit();
+    if (moved || statesChanged) {
+        persist();
+        if (moved)
+            emit repositoryListChanged();
+    }
+}
+
+void RepoManager::demote(const QString &name)
+{
+    const int i = indexOf(name);
+    if (i < 0)
+        return;
+    if (i == m_repos.size() - 1 && m_repos.at(i).state == RepoState::Deactive)
+        return;
+    Repository repo = m_repos.takeAt(i);
+    repo.state = RepoState::Deactive;
+    stopEngine(name);
+    m_repos.append(repo);
+    emit repositoryStateChanged(name, RepoState::Deactive);
+    enforceLimit();
+    persist();
+    emit repositoryListChanged();
+}
+
+bool RepoManager::enforceLimit()
+{
+    bool changed = false;
+    for (int i = 0; i < m_repos.size(); ++i) {
+        Repository &repo = m_repos[i];
+        if (i < kMaxMonitoredRepos) {
+            if (repo.state == RepoState::Deactive) {
+                repo.state = RepoState::Background;
+                changed = true;
+                emit repositoryStateChanged(repo.name, repo.state);
+            }
+            startEngine(repo.name);
+        } else {
+            if (repo.state != RepoState::Deactive) {
+                repo.state = RepoState::Deactive;
+                changed = true;
+                emit repositoryStateChanged(repo.name, repo.state);
+            }
+            stopEngine(repo.name);
+        }
+    }
+    return changed;
 }
 
 void RepoManager::syncNow(const QString &name)

@@ -1,6 +1,7 @@
 #include "core/ConfigStore.h"
 #include "core/ICommandRunner.h"
 #include "core/LogStore.h"
+#include "core/RepoManager.h"
 #include "core/RepoWatcher.h"
 #include "core/Repository.h"
 #include "core/SvnCommand.h"
@@ -307,6 +308,67 @@ static bool testRepoWatcher()
     return true;
 }
 
+static bool testRepoManagerLimit()
+{
+    std::printf("-- RepoManager concurrency limit --\n");
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
+
+    RepoManager manager;
+    const auto makeRepo = [](const QString &name) {
+        Repository repo;
+        repo.name = name;
+        repo.path = QStringLiteral("/tmp/") + name;
+        repo.url = QStringLiteral("svn://localhost/") + name;
+        repo.state = RepoState::Background;
+        return repo;
+    };
+
+    const int total = 6;
+    for (int i = 1; i <= total; ++i)
+        manager.addRepository(makeRepo(QStringLiteral("repo%1").arg(i)));
+
+    int monitored = 0;
+    for (const auto &r : manager.repositories())
+        if (r.running())
+            ++monitored;
+    check(monitored == RepoManager::kMaxMonitoredRepos,
+          "only 5 repos are monitored after adding 6");
+
+    const QList<Repository> added = manager.repositories();
+    check(added.size() == total && !added.last().running(),
+          "repo beyond the limit is stopped");
+
+    // Promote the stopped (last) repo: it must reach the top and start
+    // monitoring, pushing whoever is then 6th out of the monitored set.
+    const QString promoteName = added.last().name;
+    manager.promote(promoteName);
+    const QList<Repository> afterPromote = manager.repositories();
+    check(afterPromote.first().name == promoteName,
+          "promoted repo is at the top of the list");
+    check(manager.repository(promoteName)->running(),
+          "promoted repo is monitored again");
+    check(afterPromote.size() == total
+          && !afterPromote.at(RepoManager::kMaxMonitoredRepos).running(),
+          "the repo that fell below the limit stopped monitoring");
+
+    // Demote it again: it must go to the bottom and stop, refilling the slot
+    // it previously occupied.
+    manager.demote(promoteName);
+    const QList<Repository> afterDemote = manager.repositories();
+    check(afterDemote.last().name == promoteName,
+          "demoted repo is at the bottom of the list");
+    check(!manager.repository(promoteName)->running(),
+          "demoted repo is stopped");
+    check(afterDemote.at(RepoManager::kMaxMonitoredRepos - 1).running(),
+          "freed monitoring slot is refilled");
+
+    ConfigStore::setDatabaseFileForTest(QString());
+    return true;
+}
+
 static bool testLogStore()
 {
     std::printf("-- LogStore persistence --\n");
@@ -573,6 +635,7 @@ int main(int argc, char *argv[])
     testWorkerDedupBypass();
     testWorkerResultCorrelation();
     testRepoWatcher();
+    testRepoManagerLimit();
     testLogStore();
 
     // Optional live validation: synccoretest --live <wc> <url> [user] [pass]

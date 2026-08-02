@@ -23,6 +23,10 @@ public:
     static GlobalConfig loadGlobalConfig();
     static void saveGlobalConfig(const GlobalConfig &config);
 
+    /** Test hook: redirect the config database to a specific file
+     *  ("" restores the default location). */
+    static void setDatabaseFileForTest(const QString &dbFile);
+
 private:
     static void migrateFromRegistry();
 };

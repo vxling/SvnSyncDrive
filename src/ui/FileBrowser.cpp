@@ -153,6 +153,19 @@ public:
                             opt.text, QPalette::Text);
     }
 
+    // Give the middle columns (type/size/mtime) breathing room so the rows
+    // are not crammed together. The name (0) and status (4) columns keep
+    // their tight sizing.
+    QSize sizeHint(const QStyleOptionViewItem &option,
+                   const QModelIndex &index) const override
+    {
+        QSize size = QStyledItemDelegate::sizeHint(option, index);
+        const int column = index.column();
+        if (column >= 1 && column <= 3)
+            size.rwidth() += 20;
+        return size;
+    }
+
 private:
     const int *m_hoverRow = nullptr;
 };
@@ -689,13 +702,15 @@ void FileBrowser::populate(const QList<Entry> &entries)
         m_table->setItem(row, 0, nameItem);
 
         auto *typeItem = new QTableWidgetItem(entry.isDir ? QStringLiteral("目录") : QString());
+        typeItem->setTextAlignment(Qt::AlignCenter);
         m_table->setItem(row, 1, typeItem);
 
         auto *sizeItem = new QTableWidgetItem(entry.isDir ? QString() : formatSize(entry.size));
-        sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        sizeItem->setTextAlignment(Qt::AlignCenter);
         m_table->setItem(row, 2, sizeItem);
 
         auto *timeItem = new QTableWidgetItem(entry.mtime);
+        timeItem->setTextAlignment(Qt::AlignCenter);
         m_table->setItem(row, 3, timeItem);
 
         const QString letter = entry.name == QStringLiteral("..")

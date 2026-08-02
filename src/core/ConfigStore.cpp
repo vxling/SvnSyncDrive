@@ -12,9 +12,12 @@ namespace svnsync {
 
 namespace {
 const QString kConnection = QStringLiteral("svnsync_config");
+QString g_testDbFile;
 
 QString databaseFile()
 {
+    if (!g_testDbFile.isEmpty())
+        return g_testDbFile;
     return AppPaths::dataDir() + QLatin1String("/config.db");
 }
 
@@ -248,6 +251,17 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         db.commit();
     else
         db.rollback();
+}
+
+void ConfigStore::setDatabaseFileForTest(const QString &dbFile)
+{
+    g_testDbFile = dbFile;
+    if (QSqlDatabase::contains(kConnection)) {
+        QSqlDatabase db = QSqlDatabase::database(kConnection);
+        if (db.isOpen())
+            db.close();
+        QSqlDatabase::removeDatabase(kConnection);
+    }
 }
 
 } // namespace svnsync

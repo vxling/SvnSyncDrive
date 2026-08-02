@@ -30,6 +30,11 @@ class RepoManager : public QObject
     Q_OBJECT
 
 public:
+    /** Maximum number of repositories monitored at once. The list order
+     *  decides who runs: the first kMaxMonitoredRepos entries are monitored,
+     *  every entry after position kMaxMonitoredRepos is stopped. */
+    static constexpr int kMaxMonitoredRepos = 5;
+
     explicit RepoManager(QObject *parent = nullptr);
     ~RepoManager() override;
 
@@ -44,6 +49,14 @@ public:
     void addRepository(const Repository &repo);
     void removeRepository(const QString &name);
     void setState(const QString &name, RepoState state);
+
+    /** Move a repository to the top of the list and make sure it is being
+     *  monitored, enforcing the concurrency limit (the entry that falls past
+     *  kMaxMonitoredRepos stops monitoring). */
+    void promote(const QString &name);
+
+    /** Stop monitoring a repository and move it to the bottom of the list. */
+    void demote(const QString &name);
 
     /** Refresh the credentials used by a repository's engine. */
     void setCredentials(const QString &name, const QString &username,
@@ -69,6 +82,11 @@ private:
     void persist();
     void startEngine(const QString &name);
     void stopEngine(const QString &name);
+
+    /** Apply the monitoring limit to the current list order: the first
+     *  kMaxMonitoredRepos entries keep (or get) a running engine, every
+     *  later entry is stopped. Returns true if any state changed. */
+    bool enforceLimit();
 
     QList<Repository> m_repos;
     GlobalConfig m_config;

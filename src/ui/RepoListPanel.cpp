@@ -2,7 +2,11 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLinearGradient>
 #include <QListWidget>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -13,7 +17,7 @@ QString stateBadge(svnsync::RepoState state)
     switch (state) {
     case svnsync::RepoState::Active: return QStringLiteral("● 同步中");
     case svnsync::RepoState::Background: return QStringLiteral("◐ 后台");
-    case svnsync::RepoState::Deactive: return QStringLiteral("○ 已停用");
+    case svnsync::RepoState::Deactive: return QStringLiteral("○ 停止监控");
     }
     return QString();
 }
@@ -26,6 +30,48 @@ QColor stateColor(svnsync::RepoState state)
     case svnsync::RepoState::Deactive: return QColor(0x9E, 0x9E, 0x9E);
     }
     return QColor(Qt::black);
+}
+
+/** Small folder glyph for a repository row. Monitored repos use the app
+ *  icon's blue->teal->green gradient, stopped ones are grey, so the state is
+ *  readable at a glance. */
+QPixmap repoPixmap(svnsync::RepoState state)
+{
+    const int size = 20;
+    const qreal dpr = 2.0;
+    QPixmap pixmap(int(size * dpr), int(size * dpr));
+    pixmap.setDevicePixelRatio(dpr);
+    pixmap.fill(Qt::transparent);
+
+    const bool running = state != svnsync::RepoState::Deactive;
+    // Mirrors resources/icon.svg: #1B6FD4 -> #17A0B0 -> #2FC25B.
+    const QColor gradTop = running ? QColor(0x1B, 0x6F, 0xD4) : QColor(0xCD, 0xCD, 0xCD);
+    const QColor gradMid = running ? QColor(0x17, 0xA0, 0xB0) : QColor(0xBC, 0xBC, 0xBC);
+    const QColor gradBot = running ? QColor(0x2F, 0xC2, 0x5B) : QColor(0xAA, 0xAA, 0xAA);
+    const QColor tab = running ? QColor(0x0F, 0x5C, 0x9C) : QColor(0x95, 0x95, 0x95);
+    const QColor outline = running ? QColor(0x0E, 0x7F, 0x93) : QColor(0x8A, 0x8A, 0x8A);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // Folder tab.
+    QPainterPath tabPath;
+    tabPath.addRoundedRect(QRectF(2.5, 3.5, 8.5, 4.5), 1.6, 1.6);
+    painter.fillPath(tabPath, tab);
+
+    // Folder body.
+    QPainterPath body;
+    body.addRoundedRect(QRectF(1.5, 6, 17, 12), 2.5, 2.5);
+    QLinearGradient gradient(0, 6, 0, 18);
+    gradient.setColorAt(0, gradTop);
+    gradient.setColorAt(0.5, gradMid);
+    gradient.setColorAt(1, gradBot);
+    painter.fillPath(body, gradient);
+    painter.setPen(QPen(outline, 1.2));
+    painter.drawPath(body);
+
+    painter.end();
+    return pixmap;
 }
 
 } // namespace
@@ -77,6 +123,9 @@ RepoListPanel::RepoListPanel(QWidget *parent)
 
 void RepoListPanel::setRepositories(const QList<svnsync::Repository> &repositories)
 {
+    // Programmatic rebuilds must not re-trigger repositorySelected
+    // (which would loop back into promote() -> repositoryListChanged).
+    m_list->blockSignals(true);
     m_list->clear();
     for (const auto &repo : repositories) {
         auto *item = new QListWidgetItem(m_list);
@@ -85,6 +134,7 @@ void RepoListPanel::setRepositories(const QList<svnsync::Repository> &repositori
         item->setSizeHint(QSize(0, 64));
         rebuildRow(item, repo);
     }
+    m_list->blockSignals(false);
 }
 
 void RepoListPanel::rebuildRow(QListWidgetItem *item, const svnsync::Repository &repo)
@@ -94,6 +144,12 @@ void RepoListPanel::rebuildRow(QListWidgetItem *item, const svnsync::Repository 
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(6, 4, 6, 4);
     layout->setSpacing(8);
+
+    auto *icon = new QLabel(row);
+    icon->setPixmap(repoPixmap(repo.state));
+    icon->setFixedSize(20, 20);
+    icon->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    layout->addWidget(icon, 0, Qt::AlignVCenter);
 
     auto *texts = new QVBoxLayout;
     texts->setSpacing(0);
@@ -123,8 +179,10 @@ void RepoListPanel::rebuildRow(QListWidgetItem *item, const svnsync::Repository 
 
 void RepoListPanel::setSelectedName(const QString &name)
 {
+    m_list->blockSignals(true);
     if (QListWidgetItem *item = findItem(name))
         m_list->setCurrentItem(item);
+    m_list->blockSignals(false);
 }
 
 void RepoListPanel::updateState(const QString &name, svnsync::RepoState state)

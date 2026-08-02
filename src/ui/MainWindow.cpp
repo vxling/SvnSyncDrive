@@ -35,8 +35,8 @@ MainWindow::MainWindow(QWidget *parent)
     layout->setSpacing(8);
 
     m_sidebar = new RepoListPanel(central);
-    m_sidebar->setMinimumWidth(176);
-    m_sidebar->setMaximumWidth(272);
+    m_sidebar->setMinimumWidth(123);
+    m_sidebar->setMaximumWidth(190);
     layout->addWidget(m_sidebar);
 
     m_pages = new QStackedWidget(central);
@@ -61,7 +61,13 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(versionLabel);
 
     connect(m_sidebar, &RepoListPanel::repositorySelected,
-            this, &MainWindow::selectRepository);
+            this, [this](const QString &name) {
+                // Clicking a repository activates it and brings it to the
+                // top of the list; whoever drops below the monitoring limit
+                // stops syncing.
+                m_manager->promote(name);
+                selectRepository(name);
+            });
     connect(m_sidebar, &RepoListPanel::addRequested,
             this, &MainWindow::onAddRequested);
     connect(m_sidebar, &RepoListPanel::settingsRequested,
@@ -345,11 +351,17 @@ RepoDetailPage *MainWindow::pageFor(const QString &name)
         const auto *r = m_manager->repository(name);
         if (!r)
             return;
-        // The page is only ever shown for the selected (Active) repo, so
-        // enabling goes straight to Active, disabling to Deactive.
-        const auto next = r->running() ? svnsync::RepoState::Deactive
-                                       : svnsync::RepoState::Active;
-        m_manager->setState(name, next);
+        // Enabling promotes the repo to the monitored set; disabling demotes
+        // it to the bottom of the list where it stays stopped.
+        if (r->running())
+            m_manager->demote(name);
+        else
+            m_manager->promote(name);
+        if (m_selectedName == name) {
+            const auto *cur = m_manager->repository(name);
+            if (cur && cur->running())
+                m_manager->setState(name, svnsync::RepoState::Active);
+        }
     });
     connect(page, &RepoDetailPage::removeRequested, this, [this, name] {
         onRemoveRequested(name);

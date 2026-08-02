@@ -18,7 +18,7 @@ QString stateText(svnsync::RepoState state)
     switch (state) {
     case svnsync::RepoState::Active: return QStringLiteral("● 同步中");
     case svnsync::RepoState::Background: return QStringLiteral("◐ 后台同步");
-    case svnsync::RepoState::Deactive: return QStringLiteral("○ 已停用");
+    case svnsync::RepoState::Deactive: return QStringLiteral("○ 停止监控");
     }
     return QString();
 }
