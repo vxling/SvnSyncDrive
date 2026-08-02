@@ -282,10 +282,14 @@ void RepoWatcher::run()
         // so the debounce guarantee holds even without filesystem activity.
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
         if (throttle.elapsed() >= 500) {
-            // Rescan immediately after a directory event; also rescan every
-            // four ticks (~2s) to catch content edits QFileSystemWatcher
-            // never reports.
-            if (dirty.exchange(false) || (++ticks % 4) == 0)
+            // Always advance the tick counter so the periodic content-edit
+            // scan cannot starve: if it were short-circuited by `dirty`, a
+            // steady stream of directory events (temp files, inotify storms)
+            // would keep dirty true and the (ticks % 4) full-tree diff would
+            // never run - and content edits of existing files only reach the
+            // snapshot diff, never QFileSystemWatcher.
+            ++ticks;
+            if (dirty.exchange(false) || (ticks % 4) == 0)
                 diffAndCollect();
             collectAndMaybeEmit();
             throttle.restart();
