@@ -326,6 +326,8 @@ GlobalConfig ConfigStore::loadGlobalConfig()
             config.maxLogsPerRepo = value.toInt();
         else if (key == QStringLiteral("disconnectThreshold"))
             config.disconnectThreshold = value.toInt();
+        else if (key == QStringLiteral("networkTimeoutSec"))
+            config.networkTimeoutSec = value.toInt();
     }
     return config;
 }
@@ -362,6 +364,7 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         put(QStringLiteral("startMinimizedToTray"), QString::number(config.startMinimizedToTray));
         put(QStringLiteral("maxLogsPerRepo"), QString::number(config.maxLogsPerRepo));
         put(QStringLiteral("disconnectThreshold"), QString::number(config.disconnectThreshold));
+        put(QStringLiteral("networkTimeoutSec"), QString::number(config.networkTimeoutSec));
     }
 
     if (ok)

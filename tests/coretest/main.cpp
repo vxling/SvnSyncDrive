@@ -79,6 +79,9 @@ public:
     }
     void setCredentials(const QString &, const QString &) override {}
     void setTrustServerCertificate(bool) override {}
+    void setNetworkTimeout(int) override {}
+    void cancel() override { cancelled = true; }
+    bool cancelled = false;
 };
 
 /** Owning pair: worker owns the runner (and frees it on stop()). */

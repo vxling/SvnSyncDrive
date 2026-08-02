@@ -42,6 +42,12 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_disconnectThreshold->setToolTip(QStringLiteral("连续多少次网络访问失败后，将仓库标记为“连接断开”。任意一次成功访问都会清零重新计数"));
     form->addRow(QStringLiteral("断网判定阈值"), m_disconnectThreshold);
 
+    m_networkTimeoutSeconds = new QSpinBox(this);
+    m_networkTimeoutSeconds->setRange(5, 600);
+    m_networkTimeoutSeconds->setSuffix(QStringLiteral(" 秒"));
+    m_networkTimeoutSeconds->setToolTip(QStringLiteral("单次网络操作（如 HTTPS 握手）最多阻塞的秒数；超过后按网络错误处理并继续重试，避免卡住同步"));
+    form->addRow(QStringLiteral("网络超时"), m_networkTimeoutSeconds);
+
     m_autoAdd = new QCheckBox(QStringLiteral("自动添加未纳入版本控制的新文件"), this);
     m_autoAdd->setToolTip(QStringLiteral("关闭后只提交已有版本控制的修改"));
     m_trustCert = new QCheckBox(QStringLiteral("信任自签名 / 未知证书"), this);
@@ -80,6 +86,7 @@ void SettingsDialog::setConfig(const svnsync::GlobalConfig &config)
     m_startMinimizedToTray->setChecked(config.startMinimizedToTray);
     m_maxLogsPerRepo->setValue(config.maxLogsPerRepo);
     m_disconnectThreshold->setValue(config.disconnectThreshold);
+    m_networkTimeoutSeconds->setValue(config.networkTimeoutSec);
 }
 
 svnsync::GlobalConfig SettingsDialog::config() const
@@ -93,5 +100,6 @@ svnsync::GlobalConfig SettingsDialog::config() const
     config.startMinimizedToTray = m_startMinimizedToTray->isChecked();
     config.maxLogsPerRepo = m_maxLogsPerRepo->value();
     config.disconnectThreshold = m_disconnectThreshold->value();
+    config.networkTimeoutSec = m_networkTimeoutSeconds->value();
     return config;
 }

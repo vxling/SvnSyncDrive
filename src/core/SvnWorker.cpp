@@ -106,6 +106,16 @@ public:
         m_client.setTrustServerCertificate(trust);
     }
 
+    void setNetworkTimeout(int timeoutSeconds) override
+    {
+        m_client.setNetworkTimeout(timeoutSeconds);
+    }
+
+    void cancel() override
+    {
+        m_client.cancel();
+    }
+
 private:
     static CommandResult fail(const CommandItem &item, const SvnPlus::SvnError &err)
     {
@@ -473,6 +483,21 @@ void SvnWorker::setTrustServerCertificate(bool trust)
     m_cv.notify_all();
 }
 
+void SvnWorker::setNetworkTimeout(int timeoutSeconds)
+{
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_networkTimeoutSec = timeoutSeconds;
+        m_credsDirty = true;
+    }
+    m_cv.notify_all();
+}
+
+void SvnWorker::setCommandTimeoutSec(int seconds)
+{
+    m_commandTimeoutSec.store(seconds > 0 ? seconds : 0);
+}
+
 void SvnWorker::workerLoop()
 {
     m_runner = m_factory();
@@ -484,6 +509,7 @@ void SvnWorker::workerLoop()
             if (m_credsDirty) {
                 m_runner->setCredentials(m_username, m_password);
                 m_runner->setTrustServerCertificate(m_trustCert);
+                m_runner->setNetworkTimeout(m_networkTimeoutSec);
                 m_credsDirty = false;
             }
             m_cv.wait(lk, [this] {
@@ -499,12 +525,39 @@ void SvnWorker::workerLoop()
             if (m_credsDirty) {
                 m_runner->setCredentials(m_username, m_password);
                 m_runner->setTrustServerCertificate(m_trustCert);
+                m_runner->setNetworkTimeout(m_networkTimeoutSec);
                 m_credsDirty = false;
             }
             item = takeNextLocked();
         }
 
-        const CommandResult result = m_runner->execute(item);
+        CommandResult result;
+        const int timeoutSec = m_commandTimeoutSec.load();
+        if (timeoutSec <= 0) {
+            result = m_runner->execute(item);
+        } else {
+            // Watchdog: if the command outlives the timeout (e.g. a TCP/SSL
+            // handshake that neither connected nor failed), abort it so a
+            // single stuck command cannot block the whole worker.
+            bool watchdogDone = false;
+            std::thread watchdog([this, timeoutSec, &watchdogDone]() {
+                std::unique_lock<std::mutex> lk(m_mutex);
+                m_watchdogCv.wait_for(lk, std::chrono::seconds(timeoutSec),
+                                      [this, &watchdogDone] {
+                                          return m_stopping || watchdogDone;
+                                      });
+                if (!watchdogDone)
+                    m_runner->cancel();
+            });
+            result = m_runner->execute(item);
+            {
+                std::lock_guard<std::mutex> lk(m_mutex);
+                watchdogDone = true;
+            }
+            m_watchdogCv.notify_one();
+            watchdog.join();
+        }
+
         {
             std::lock_guard<std::mutex> lk(m_mutex);
             removeFromDedupLocked(item);

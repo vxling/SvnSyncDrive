@@ -7,6 +7,7 @@
 #include <QObject>
 
 #include <condition_variable>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -55,6 +56,14 @@ public:
     void setCredentials(const QString &username, const QString &password);
     void setTrustServerCertificate(bool trust);
 
+    /** Network-operation timeout (seconds) applied to the runner's client. */
+    void setNetworkTimeout(int timeoutSeconds);
+
+    /** Hard watchdog timeout per command (seconds); 0 disables it. When a
+     *  command exceeds this, the runner's cancel() is called. Must be larger
+     *  than the network timeout so a normal timeout error arrives first. */
+    void setCommandTimeoutSec(int seconds);
+
 signals:
     void resultReady(quint64 id, const CommandResult &result);
     void finished();
@@ -85,7 +94,11 @@ private:
     QString m_username;
     QString m_password;
     bool m_trustCert = false;
+    int m_networkTimeoutSec = 0;
     bool m_credsDirty = true;
+
+    std::atomic<int> m_commandTimeoutSec{ 0 };
+    std::condition_variable m_watchdogCv;
 };
 
 } // namespace svnsync

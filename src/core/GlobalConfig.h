@@ -37,6 +37,12 @@ struct GlobalConfig
      *  is marked disconnected. A single successful server command resets
      *  the counter. */
     int disconnectThreshold = 3;
+
+    /** Per-command network timeout in seconds applied to each SVN operation
+     *  (libsvn http-timeout). The worker adds a small watchdog margin on top;
+     *  a stuck connection therefore gives up after roughly this long instead
+     *  of blocking the worker for libsvn's default 600 seconds. */
+    int networkTimeoutSec = 60;
 };
 
 } // namespace svnsync

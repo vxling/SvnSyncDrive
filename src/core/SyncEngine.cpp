@@ -125,6 +125,8 @@ void SyncEngine::start()
     m_worker->start();
     m_worker->setCredentials(m_repo.username, m_repo.password);
     m_worker->setTrustServerCertificate(m_config.trustServerCertificate);
+    m_worker->setNetworkTimeout(m_config.networkTimeoutSec);
+    m_worker->setCommandTimeoutSec(m_config.networkTimeoutSec + 10);
 
     if (!m_watcher->start(m_repo.path))
         notify(tr("无法监听目录: %1").arg(m_repo.path));
@@ -144,6 +146,8 @@ void SyncEngine::setConfig(const GlobalConfig &config)
     m_pollTimer.setInterval(m_config.pollIntervalMs);
     m_fullSyncTimer.setInterval(m_config.fullSyncIntervalMs);
     m_worker->setTrustServerCertificate(m_config.trustServerCertificate);
+    m_worker->setNetworkTimeout(m_config.networkTimeoutSec);
+    m_worker->setCommandTimeoutSec(m_config.networkTimeoutSec + 10);
 }
 
 void SyncEngine::setCredentials(const QString &username, const QString &password)
