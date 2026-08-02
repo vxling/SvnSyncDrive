@@ -3,6 +3,7 @@
 #include "core/GlobalConfig.h"
 #include "core/Repository.h"
 
+#include <QHash>
 #include <QObject>
 #include <QStringList>
 
@@ -62,6 +63,18 @@ public:
     void setCredentials(const QString &name, const QString &username,
                         const QString &password);
 
+    /** Set a repo to the transient AuthFailed state (engine stopped) after
+     *  an SVN authentication error; setCredentials() resumes it. */
+    void markAuthFailed(const QString &name);
+
+    /** Set a repo to the transient Disconnected state (engine keeps running)
+     *  after kDisconnectThreshold consecutive server-access failures. */
+    void markDisconnected(const QString &name);
+
+    /** Restore a Disconnected repo to its pre-disconnect running state after
+     *  a server command finally succeeds. */
+    void clearDisconnected(const QString &name);
+
     /** Request an immediate upward sync for one repository. */
     void syncNow(const QString &name);
 
@@ -91,6 +104,9 @@ private:
     QList<Repository> m_repos;
     GlobalConfig m_config;
     std::unordered_map<QString, std::unique_ptr<SyncEngine>> m_engines;
+    // Running state a repo had before it was marked Disconnected, restored on
+    // clearDisconnected(). Not persisted (both transient states are not).
+    QHash<QString, RepoState> m_priorStates;
 };
 
 } // namespace svnsync

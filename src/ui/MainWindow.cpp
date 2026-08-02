@@ -165,6 +165,7 @@ void MainWindow::onStateChanged(const QString &name, svnsync::RepoState state)
     if (RepoDetailPage *page = pageFor(name)) {
         page->setState(state);
         page->setEngine(state == svnsync::RepoState::Deactive
+                || state == svnsync::RepoState::AuthFailed
             ? nullptr : m_manager->engine(name));
     }
 }

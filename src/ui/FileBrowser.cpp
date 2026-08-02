@@ -270,9 +270,15 @@ void FileBrowser::setToggleState(svnsync::RepoState state)
 {
     if (!m_toggleButton)
         return;
-    m_toggleButton->setText(state == svnsync::RepoState::Deactive
-        ? QStringLiteral("▶ 启用同步")
-        : QStringLiteral("⏸ 停用同步"));
+    // AuthFailed is stopped (like Deactive); its toggle acts as a manual
+    // retry that restarts the engine with the current (possibly fixed)
+    // credentials.
+    const bool running = state == svnsync::RepoState::Background
+        || state == svnsync::RepoState::Active
+        || state == svnsync::RepoState::Disconnected;
+    m_toggleButton->setText(running
+        ? QStringLiteral("⏸ 停用同步")
+        : QStringLiteral("▶ 启用同步"));
 }
 
 void FileBrowser::refresh()

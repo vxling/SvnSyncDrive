@@ -19,6 +19,8 @@ QString stateText(svnsync::RepoState state)
     case svnsync::RepoState::Active: return QStringLiteral("● 同步中");
     case svnsync::RepoState::Background: return QStringLiteral("◐ 后台同步");
     case svnsync::RepoState::Deactive: return QStringLiteral("○ 停止监控");
+    case svnsync::RepoState::AuthFailed: return QStringLiteral("✕ 认证失败");
+    case svnsync::RepoState::Disconnected: return QStringLiteral("✖ 断开链接");
     }
     return QString();
 }
@@ -29,6 +31,8 @@ QColor stateColor(svnsync::RepoState state)
     case svnsync::RepoState::Active: return QColor(0x00, 0x9A, 0x3E);
     case svnsync::RepoState::Background: return QColor(0xE8, 0x8A, 0x00);
     case svnsync::RepoState::Deactive: return QColor(0x9E, 0x9E, 0x9E);
+    case svnsync::RepoState::AuthFailed: return QColor(0xD3, 0x2F, 0x2F);
+    case svnsync::RepoState::Disconnected: return QColor(0xE6, 0x4A, 0x19);
     }
     return QColor(Qt::black);
 }

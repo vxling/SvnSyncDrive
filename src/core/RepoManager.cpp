@@ -81,7 +81,7 @@ void RepoManager::setState(const QString &name, RepoState state)
         return;
     m_repos[i].state = state;
 
-    if (state == RepoState::Deactive)
+    if (state == RepoState::Deactive || state == RepoState::AuthFailed)
         stopEngine(name);
     else
         startEngine(name);
@@ -136,7 +136,10 @@ bool RepoManager::enforceLimit()
                 changed = true;
                 emit repositoryStateChanged(repo.name, repo.state);
             }
-            startEngine(repo.name);
+            // An AuthFailed repo stays stopped (awaiting fixed credentials);
+            // it must never be silently restarted by the limit enforcement.
+            if (repo.state != RepoState::AuthFailed)
+                startEngine(repo.name);
         } else {
             if (repo.state != RepoState::Deactive) {
                 repo.state = RepoState::Deactive;
@@ -169,8 +172,59 @@ void RepoManager::setCredentials(const QString &name, const QString &username,
     if (!password.isEmpty())
         m_repos[i].password = password;
     persist();
-    if (SyncEngine *e = engine(name))
+    if (m_repos[i].state == RepoState::AuthFailed) {
+        // Credentials were why it stopped; restart with the new ones. Using
+        // enforceLimit() keeps the monitoring-limit semantics (a repo beyond
+        // the limit stays stopped even after the credential fix).
+        m_priorStates.remove(name);
+        m_repos[i].state = RepoState::Background;
+        enforceLimit();
+        emit repositoryStateChanged(name, m_repos.at(i).state);
+    } else if (SyncEngine *e = engine(name)) {
         e->setCredentials(username, password);
+    }
+}
+
+void RepoManager::markAuthFailed(const QString &name)
+{
+    const int i = indexOf(name);
+    if (i < 0)
+        return;
+    if (m_repos[i].state == RepoState::AuthFailed)
+        return;
+    m_priorStates.remove(name);
+    stopEngine(name);
+    m_repos[i].state = RepoState::AuthFailed;
+    persist();  // writes the durable Background equivalent, not the transient state
+    emit repositoryStateChanged(name, RepoState::AuthFailed);
+    emit notification(name, tr("认证失败，已停止同步。请在仓库配置中更新凭据后恢复。"));
+}
+
+void RepoManager::markDisconnected(const QString &name)
+{
+    const int i = indexOf(name);
+    if (i < 0)
+        return;
+    if (m_repos[i].state == RepoState::Disconnected)
+        return;
+    m_priorStates[name] = m_repos[i].state;
+    m_repos[i].state = RepoState::Disconnected;
+    emit repositoryStateChanged(name, RepoState::Disconnected);
+    emit notification(name, tr("连接断开（连续多次服务器访问失败），将继续重试…"));
+}
+
+void RepoManager::clearDisconnected(const QString &name)
+{
+    const int i = indexOf(name);
+    if (i < 0)
+        return;
+    if (m_repos[i].state != RepoState::Disconnected)
+        return;
+    const RepoState prior = m_priorStates.take(name);
+    m_repos[i].state = (prior == RepoState::Active || prior == RepoState::Background)
+        ? prior : RepoState::Background;
+    emit repositoryStateChanged(name, m_repos.at(i).state);
+    emit notification(name, tr("连接已恢复。"));
 }
 
 void RepoManager::setConfig(const GlobalConfig &config)
@@ -191,7 +245,14 @@ int RepoManager::indexOf(const QString &name) const
 
 void RepoManager::persist()
 {
-    ConfigStore::saveRepositories(m_repos);
+    // AuthFailed/Disconnected are transient, in-memory-only states: the
+    // persisted config always keeps the last durable running/stopped state.
+    QList<Repository> durable = m_repos;
+    for (Repository &r : durable) {
+        if (r.state == RepoState::AuthFailed || r.state == RepoState::Disconnected)
+            r.state = RepoState::Background;
+    }
+    ConfigStore::saveRepositories(durable);
 }
 
 void RepoManager::startEngine(const QString &name)
