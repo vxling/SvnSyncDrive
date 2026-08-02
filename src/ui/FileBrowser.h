@@ -62,8 +62,17 @@ private:
     void applyStatus(const QString &dir, const svnsync::CommandResult &result);
     void populate(const QList<Entry> &entries);
 
-    /** Shows the row context menu (open / svn actions). */
+    /** Shows the row context menu (open / new file / svn actions). */
     void showContextMenu(const QPoint &pos);
+
+    /**
+     * Opens a path the same way as the "打开" menu action: directories are
+     * entered, everything else goes to the system default application.
+     */
+    void openEntry(const QString &fullPath);
+
+    /** Creates a new folder (isDir) or an empty text file in the current dir. */
+    void createNewEntry(bool isDir);
 
     /** Schedules an SVN command on the current row's path; refreshes after. */
     void submitAction(svnsync::Command command,

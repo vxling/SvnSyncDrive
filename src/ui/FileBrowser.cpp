@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -240,12 +241,10 @@ FileBrowser::FileBrowser(QWidget *parent)
                 const QString name = nameItem->data(Qt::UserRole).toString();
                 if (name == QStringLiteral("..")) {
                     goUp();
-                } else {
-                    const QString target = QDir::cleanPath(m_currentDir + QLatin1Char('/') + name);
-                    const QFileInfo info(target);
-                    if (info.isDir())
-                        refreshFor(target);
+                    return;
                 }
+                openEntry(
+                    QDir::cleanPath(m_currentDir + QLatin1Char('/') + name));
             });
 }
 
@@ -337,13 +336,8 @@ void FileBrowser::showContextMenu(const QPoint &pos)
 
     QMenu menu(this);
     QAction *openAction = nullptr;
-    QAction *openFolderAction = nullptr;
-    QAction *commitAction = nullptr;
-    QAction *updateAction = nullptr;
-    QAction *revertAction = nullptr;
-    QAction *addAction = nullptr;
-    QAction *deleteAction = nullptr;
-    QAction *renameAction = nullptr;
+    QAction *newFolderAction = nullptr;
+    QAction *newTextFileAction = nullptr;
     QAction *copyPathAction = nullptr;
 
     if (info.isDir()) {
@@ -351,22 +345,33 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     } else {
         openAction = menu.addAction(QStringLiteral("打开"));
     }
+    newFolderAction = menu.addAction(QStringLiteral("新建文件夹"));
+    newTextFileAction = menu.addAction(QStringLiteral("新建文本文件"));
     menu.addSeparator();
+    copyPathAction = menu.addAction(QStringLiteral("复制完整路径"));
+    menu.addSeparator();
+
+    // All SVN operations live in one "advanced" submenu.
+    QMenu *advanced = menu.addMenu(QStringLiteral("高级操作"));
+    QAction *commitAction = nullptr;
+    QAction *updateAction = nullptr;
+    QAction *revertAction = nullptr;
+    QAction *addAction = nullptr;
+    QAction *deleteAction = nullptr;
+    QAction *renameAction = nullptr;
 
     const bool hasEngine = m_engine != nullptr;
     const bool isUnversioned = kind == svnsync::StatusKind::Unversioned;
 
     if (isUnversioned) {
-        addAction = menu.addAction(QStringLiteral("添加到版本库 (Add)"));
+        addAction = advanced->addAction(QStringLiteral("添加到版本库 (Add)"));
     } else {
-        commitAction = menu.addAction(QStringLiteral("提交… (Commit)"));
-        updateAction = menu.addAction(QStringLiteral("更新 (Update)"));
-        revertAction = menu.addAction(QStringLiteral("还原 (Revert)"));
+        commitAction = advanced->addAction(QStringLiteral("提交… (Commit)"));
+        updateAction = advanced->addAction(QStringLiteral("更新 (Update)"));
+        revertAction = advanced->addAction(QStringLiteral("还原 (Revert)"));
     }
-    deleteAction = menu.addAction(QStringLiteral("从版本库删除 (Delete)"));
-    renameAction = menu.addAction(QStringLiteral("重命名… (Move)"));
-    menu.addSeparator();
-    copyPathAction = menu.addAction(QStringLiteral("复制完整路径"));
+    deleteAction = advanced->addAction(QStringLiteral("从版本库删除 (Delete)"));
+    renameAction = advanced->addAction(QStringLiteral("重命名… (Move)"));
 
     for (QAction *a : { commitAction, updateAction, revertAction, addAction,
                         deleteAction, renameAction }) {
@@ -382,10 +387,15 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     const QString fullBase = QDir::fromNativeSeparators(fullPath);
 
     if (chosen == openAction) {
-        if (info.isDir())
-            refreshFor(fullBase);
-        else
-            QDesktopServices::openUrl(QUrl::fromLocalFile(fullBase));
+        openEntry(fullBase);
+        return;
+    }
+    if (chosen == newFolderAction) {
+        createNewEntry(true);
+        return;
+    }
+    if (chosen == newTextFileAction) {
+        createNewEntry(false);
         return;
     }
     if (chosen == copyPathAction) {
@@ -445,6 +455,48 @@ void FileBrowser::showContextMenu(const QPoint &pos)
         submitAction(svnsync::Command::Move, toPath, QString(), fullBase);
         return;
     }
+}
+
+void FileBrowser::openEntry(const QString &fullPath)
+{
+    const QFileInfo info(fullPath);
+    if (info.isDir()) {
+        refreshFor(QDir::cleanPath(fullPath));
+    } else {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(fullPath));
+    }
+}
+
+void FileBrowser::createNewEntry(bool isDir)
+{
+    const QString baseName = isDir
+        ? QStringLiteral("新建文件夹")
+        : QStringLiteral("新建文本文件.txt");
+    bool ok = false;
+    const QString name = QInputDialog::getText(
+        this,
+        isDir ? QStringLiteral("新建文件夹") : QStringLiteral("新建文本文件"),
+        QStringLiteral("名称："), QLineEdit::Normal, baseName, &ok);
+    if (!ok || name.trimmed().isEmpty())
+        return;
+
+    const QString target =
+        QDir::cleanPath(m_currentDir + QLatin1Char('/') + name.trimmed());
+    if (QFileInfo::exists(target)) {
+        QMessageBox::warning(this, QStringLiteral("新建"),
+                             QStringLiteral("同名文件或文件夹已存在。"));
+        return;
+    }
+
+    bool created = false;
+    if (isDir) {
+        created = QDir().mkpath(target);
+    } else {
+        QFile file(target);
+        created = file.open(QIODevice::WriteOnly);
+    }
+    if (created)
+        refresh();
 }
 
 void FileBrowser::submitAction(svnsync::Command command,
