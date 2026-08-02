@@ -506,14 +506,19 @@ void SyncEngine::fullSync()
     upd.bypassDedup = true;  // must run and report, even if a user update is queued
     submit(upd, [this](const CommandResult &r) {
         m_watcher->setSuspended(false);
-        if (!r.success)
-            notify(tr("定时全量同步更新失败: %1").arg(r.error));
+        m_fullSyncing = false;
+        if (!r.success) {
+            // Nothing was updated, so the whole full-sync cycle failed: report
+            // it as a failure and skip the pointless conflict scan + scan/commit
+            // that would only produce more network errors.
+            notify(tr("定时全量同步失败: %1").arg(r.error));
+            return;
+        }
         detectConflicts([this, r]() {
             emit filesChanged();
-            m_fullSyncing = false;
             bool countOk = false;
             const int count = r.value.toInt(&countOk);
-            if (r.success && r.revision > 0) {
+            if (r.revision > 0) {
                 if (countOk && count > 0)
                     notify(tr("定时全量同步完成（更新到 r%1，%2 个文件/目录）")
                                .arg(r.revision).arg(count));
