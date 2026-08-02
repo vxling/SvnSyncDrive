@@ -57,13 +57,10 @@ void SyncEngine::start()
     m_pollTimer.start();
     m_fullSyncTimer.start();
 
-    // Immediate downward sync to pick up other machines' changes.
-    poll();
-
-    // Immediate upward scan: file-system events raised around startup may be
-    // missed while the watcher is being set up, so scan once to commit any
-    // changes already present (including leftovers from a previous run).
-    scanAndCommit();
+    // Immediate full sync on startup: a whole-tree `svn update` picks up
+    // other machines' changes in one pass (replacing the old incremental
+    // poll), then the full upward scan+commit runs when the update finishes.
+    fullSync();
 }
 
 void SyncEngine::setConfig(const GlobalConfig &config)
