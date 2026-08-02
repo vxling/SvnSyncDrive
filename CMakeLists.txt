@@ -74,6 +74,9 @@ target_link_libraries(svnsync_core PUBLIC Qt6::Core Qt6::Sql PRIVATE ${SVNPLUS_L
 
 # Copies the libsvn runtime DLLs next to a target so it can start standalone.
 function(copy_libsvn_runtime_dlls TARGET)
+    if(NOT WIN32)
+        return()
+    endif()
     file(GLOB LIBSVN_RUNTIME_DLLS "${LIBSVNPLUS_ROOT}/bin/*.dll")
     add_custom_command(TARGET ${TARGET} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
