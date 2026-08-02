@@ -504,7 +504,8 @@ static bool runLiveRepo(const QString &wc, const QString &url,
     return committed && committed2;
 }
 
-static bool runLiveSync(const QString &url, const QString &wcApp, const QString &wcOther)
+static bool runLiveSync(const QString &url, const QString &wcApp, const QString &wcOther,
+                        const QString &user = QString(), const QString &pass = QString())
 {
     std::printf("-- live sync round-trip (%s) --\n", qPrintable(url));
     if (!QDir(wcApp).exists() || !QDir(wcOther).exists()) {
@@ -518,6 +519,8 @@ static bool runLiveSync(const QString &url, const QString &wcApp, const QString 
     repo.name = QStringLiteral("live");
     repo.path = wcApp;
     repo.url = url;
+    repo.username = user;
+    repo.password = pass;
 
     SyncEngine engine(repo);
     QStringList notifications;
@@ -537,6 +540,10 @@ static bool runLiveSync(const QString &url, const QString &wcApp, const QString 
     // A second client that stands in for "another user" (and verifies the
     // app working copy from the outside).
     SvnPlus::SvnClient other;
+    if (!user.isEmpty())
+        other.setUsername(user.toStdString());
+    if (!pass.isEmpty())
+        other.setPassword(pass.toStdString());
     auto committed = [&other](const QString &path) {
         std::vector<SvnPlus::SvnInfo> infos;
         const SvnPlus::SvnError err =
@@ -647,10 +654,13 @@ int main(int argc, char *argv[])
         runLiveRepo(args.at(idx + 1), args.at(idx + 2), user, pass);
     }
 
-    // Two-way live sync: synccoretest --livesync <url> <wc-app> <wc-other>
+    // Two-way live sync: synccoretest --livesync <url> <wc-app> <wc-other> [user] [pass]
     const int syncIdx = args.indexOf(QStringLiteral("--livesync"));
     if (syncIdx >= 0 && syncIdx + 3 < args.size()) {
-        runLiveSync(args.at(syncIdx + 1), args.at(syncIdx + 2), args.at(syncIdx + 3));
+        const QString syncUser = syncIdx + 4 < args.size() ? args.at(syncIdx + 4) : QString();
+        const QString syncPass = syncIdx + 5 < args.size() ? args.at(syncIdx + 5) : QString();
+        runLiveSync(args.at(syncIdx + 1), args.at(syncIdx + 2), args.at(syncIdx + 3),
+                    syncUser, syncPass);
     }
 
     // Probe: synccoretest --probestatus <wc-path> [outOfDate] [depth]
