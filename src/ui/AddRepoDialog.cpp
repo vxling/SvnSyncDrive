@@ -245,6 +245,12 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
     if (m_okButton->isEnabled())
         restoreOkFocus();
     if (result.success) {
+        if (m_validateOnSuccess) {
+            // "添加" against an existing working copy: the connection was
+            // verified above, so attach immediately.
+            accept();
+            return;
+        }
         m_testResult->setText(
             result.revision > 0
                 ? QStringLiteral("连接成功（HEAD 版本 r%1）").arg(result.revision)
@@ -314,7 +320,10 @@ void AddRepoDialog::validate()
         startCheckout(path);
         return;
     }
-    accept();
+    // Existing working copy: verify the URL and credentials against the
+    // server before attaching, so a bad URL or password is caught here
+    // instead of on the first background sync.
+    testConnection(true);
 }
 
 void AddRepoDialog::startCheckout(const QString &path)
