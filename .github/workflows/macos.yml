@@ -21,8 +21,9 @@ jobs:
 
       - name: Install Qt 6.8 LTS via aqt
         run: |
-          python3 -m pip install --quiet aqtinstall
-          python3 -m aqt install-qt mac desktop 6.8.3 clang_64 \
+          python3 -m venv "$HOME/.venv"
+          "$HOME/.venv/bin/python" -m pip install --quiet aqtinstall
+          "$HOME/.venv/bin/python" -m aqt install-qt mac desktop 6.8.3 clang_64 \
             -O "$HOME/qt" --archives qtbase qttools
 
       - name: Download libsvnplus macOS arm64 stage
