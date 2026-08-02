@@ -163,6 +163,16 @@ set_target_properties(svnsyncdrive PROPERTIES WIN32_EXECUTABLE TRUE)
 if(WIN32)
     target_link_libraries(svnsyncdrive PRIVATE Qt6::EntryPointPrivate)
 endif()
+if(APPLE)
+    set_target_properties(svnsyncdrive PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "SvnSyncDrive"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.svnsyncdrive.mac"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_COPYRIGHT "2026 SvnSyncDrive"
+    )
+endif()
 copy_libsvn_runtime_dlls(svnsyncdrive)
 deploy_qt(svnsyncdrive)
 

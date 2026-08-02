@@ -1,0 +1,58 @@
+name: macos-arm64
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Architecture guard
+        run: |
+          test "$(uname -m)" = "arm64" || { echo "Expected an arm64 (Apple Silicon) runner" >&2; exit 1; }
+
+      - name: Install Qt 6.8 LTS via aqt
+        run: |
+          python3 -m pip install --quiet aqtinstall
+          python3 -m aqt install-qt mac desktop 6.8.3 clang_64 \
+            -O "$HOME/qt" --archives qtbase qttools
+
+      - name: Download libsvnplus macOS arm64 stage
+        run: |
+          mkdir -p "$HOME/stage"
+          curl -fL --retry 3 -o "$HOME/stage/stage.tar.gz" \
+            https://github.com/vxling/LibSVNPlus/releases/download/macos-stage/libsvnplus-0.0.0-macos-arm64.tar.gz
+          tar -xzf "$HOME/stage/stage.tar.gz" -C "$HOME/stage"
+
+      - name: Build, test and package
+        run: |
+          export QT_ROOT="$HOME/qt/6.8.3/clang_64"
+          export SVN_STAGE="$HOME/stage/libsvnplus-0.0.0-macos-arm64"
+          bash scripts/publish-macos.sh
+
+      - name: Sanity check
+        run: |
+          file build-macos/svnsyncdrive.app/Contents/MacOS/svnsyncdrive
+          test -d build-macos/svnsyncdrive.app/Contents/Frameworks
+          ls -la build-macos/publish/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: svnsyncdrive-macos-arm64
+          path: build-macos/publish/*
+          if-no-files-found: error
+
+      - name: Attach to GitHub release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build-macos/publish/*
