@@ -42,19 +42,27 @@ public:
     void setRepository(const svnsync::Repository &repo);
     svnsync::Repository repository() const;
 
+    /** Apply the global "trust self-signed / unknown certificates" setting
+     *  to the dialog's temporary SvnWorker. */
+    void setTrustServerCertificate(bool trust);
+
 private:
     static QString defaultPathFor(const QString &name);
 
     void choosePath();
-    void testConnection();
+    void testConnection(bool validate);
     void onTestResult(quint64 id, const svnsync::CommandResult &result);
     void validate();
     void startCheckout(const QString &path);
+    void restoreOkFocus();
 
     const bool m_configure;
     svnsync::RepoState m_state = svnsync::RepoState::Background;
     bool m_pathCustomized = false;
     bool m_checkoutPending = false;
+    // In configure mode a successful test only closes the dialog when the
+    // "更新" button initiated it; "测试连接" must keep the dialog open.
+    bool m_validateOnSuccess = false;
 
     QLineEdit *m_name = nullptr;
     QLineEdit *m_path = nullptr;
@@ -68,4 +76,5 @@ private:
 
     std::unique_ptr<svnsync::SvnWorker> m_worker;
     quint64 m_testId = 0;
+    bool m_trustCert = true;
 };

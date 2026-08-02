@@ -97,8 +97,8 @@ QString formatSize(qlonglong bytes)
 
 /**
  * Renders rows with a full-row hover/selection highlight (instead of the
- * per-cell highlight of the native style) using light backgrounds, and draws
- * only horizontal separators so the list has no vertical grid lines.
+ * per-cell highlight of the native style) using light backgrounds, with no
+ * row separators or grid lines.
  */
 class RowHoverDelegate : public QStyledItemDelegate
 {
@@ -122,8 +122,6 @@ public:
             bg = QColor(0xEA, 0xF2, 0xFB);   // very light blue
         else if (selected)
             bg = QColor(0xD8, 0xE9, 0xFA);   // light blue
-        else if (opt.features & QStyleOptionViewItem::Alternate)
-            bg = opt.palette.alternateBase().color();
         else
             bg = opt.palette.base().color();
         painter->fillRect(opt.rect, bg);
@@ -131,7 +129,13 @@ public:
         QStyleOptionViewItem f = opt;
         f.state &= ~(QStyle::State_Selected | QStyle::State_MouseOver);
         f.state |= QStyle::State_Enabled;
-        if (selected)
+        // Keep per-cell foreground colors (e.g. the green status glyph) even
+        // while the row is selected; only plain cells fall back to
+        // near-black text on selection.
+        const QBrush itemBrush = index.data(Qt::ForegroundRole).value<QBrush>();
+        if (itemBrush.style() != Qt::NoBrush)
+            f.palette.setBrush(QPalette::Text, itemBrush);
+        else if (selected)
             f.palette.setColor(QPalette::Text, QColor(0x10, 0x10, 0x10));
 
         QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
@@ -147,10 +151,6 @@ public:
         style->drawItemText(painter, textRect, opt.displayAlignment, f.palette,
                             opt.widget != nullptr && opt.widget->isEnabled(),
                             opt.text, QPalette::Text);
-
-        painter->setPen(QPen(QColor(0xDC, 0xDC, 0xDC)));
-        painter->drawLine(opt.rect.left(), opt.rect.bottom(),
-                          opt.rect.right(), opt.rect.bottom());
     }
 
 private:
@@ -202,8 +202,7 @@ FileBrowser::FileBrowser(QWidget *parent)
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_table->setAlternatingRowColors(true);
-    m_table->setShowGrid(false);  // no vertical grid lines; delegate draws row separators
+    m_table->setShowGrid(false);  // no grid lines; delegate draws no separators
     m_table->verticalHeader()->setVisible(false);
     m_table->horizontalHeader()->setStretchLastSection(false);
     m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);

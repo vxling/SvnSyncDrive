@@ -97,7 +97,8 @@ AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
     connect(browse, &QPushButton::clicked, this, &AddRepoDialog::choosePath);
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
     connect(m_okButton, &QPushButton::clicked, this, &AddRepoDialog::validate);
-    connect(m_testButton, &QPushButton::clicked, this, &AddRepoDialog::testConnection);
+    connect(m_testButton, &QPushButton::clicked, this,
+            [this] { testConnection(false); });
     connect(m_name, &QLineEdit::textChanged, this, [this](const QString &name) {
         if (!m_configure && !m_pathCustomized)
             m_path->setText(QDir::toNativeSeparators(defaultPathFor(name)));
@@ -117,6 +118,12 @@ AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
 }
 
 AddRepoDialog::~AddRepoDialog() = default;
+
+void AddRepoDialog::setTrustServerCertificate(bool trust)
+{
+    m_trustCert = trust;
+    m_worker->setTrustServerCertificate(trust);
+}
 
 QString AddRepoDialog::defaultPathFor(const QString &name)
 {
@@ -158,8 +165,9 @@ void AddRepoDialog::choosePath()
     }
 }
 
-void AddRepoDialog::testConnection()
+void AddRepoDialog::testConnection(bool validate)
 {
+    m_validateOnSuccess = validate;
     const QString url = m_url->text().trimmed();
     if (url.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("缺少 URL"),
@@ -197,6 +205,8 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
                 QStringLiteral("创建工作副本失败：%1").arg(result.error));
             m_testResult->setStyleSheet(QStringLiteral("color: #C62828;"));
             m_okButton->setEnabled(!m_name->text().trimmed().isEmpty());
+            if (m_okButton->isEnabled())
+                restoreOkFocus();
         }
         return;
     }
@@ -206,17 +216,35 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
 
     if (m_configure) {
         if (result.success) {
-            accept();
+            if (m_validateOnSuccess) {
+                // "更新": the user is confirming new credentials, so the
+                // dialog closes once the connection is accepted.
+                accept();
+            } else {
+                // "测试连接": report success but keep the dialog open.
+                m_testResult->setText(
+                    result.revision > 0
+                        ? QStringLiteral("连接成功（HEAD 版本 r%1）").arg(result.revision)
+                        : QStringLiteral("连接成功"));
+                m_testResult->setStyleSheet(QStringLiteral("color: #009A3E;"));
+                m_okButton->setEnabled(!m_password->text().isEmpty());
+                if (m_okButton->isEnabled())
+                    restoreOkFocus();
+            }
         } else {
             m_testResult->setText(
                 QStringLiteral("用户名或密码不正确：%1").arg(result.error));
             m_testResult->setStyleSheet(QStringLiteral("color: #C62828;"));
             m_okButton->setEnabled(!m_password->text().isEmpty());
+            if (m_okButton->isEnabled())
+                restoreOkFocus();
         }
         return;
     }
 
     m_okButton->setEnabled(!m_name->text().trimmed().isEmpty());
+    if (m_okButton->isEnabled())
+        restoreOkFocus();
     if (result.success) {
         m_testResult->setText(
             result.revision > 0
@@ -234,7 +262,7 @@ void AddRepoDialog::validate()
     if (m_configure) {
         // Validate the (new) credentials against the server; the dialog
         // closes only when the connection succeeds.
-        testConnection();
+        testConnection(true);
         return;
     }
 
@@ -313,6 +341,15 @@ void AddRepoDialog::startCheckout(const QString &path)
     item.password = m_password->text();
     m_worker->setCredentials(item.username, item.password);
     m_worker->submit(item);
+}
+
+void AddRepoDialog::restoreOkFocus()
+{
+    // Re-enabling a button does not return the dialog's default/focus to it:
+    // disabling the focused "测试连接" during the test pushed focus to
+    // "取消", so put the primary action back in charge on every re-enable.
+    m_okButton->setDefault(true);
+    m_okButton->setFocus();
 }
 
 svnsync::Repository AddRepoDialog::repository() const

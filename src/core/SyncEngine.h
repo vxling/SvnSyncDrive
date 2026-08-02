@@ -88,7 +88,8 @@ private:
     void poll();
     void fullSync();
     void startUpdateInChunks(qlonglong serverRev, qlonglong localRev);
-    void afterUpdateDone(qlonglong serverRev, qlonglong localRev);
+    void afterUpdateDone(qlonglong serverRev, qlonglong localRev,
+                         const QStringList &remotePaths);
     void detectConflicts(const std::function<void()> &done);
 
     static QStringList mergeToDirs(const QStringList &paths, const QString &repoRoot);
@@ -124,6 +125,9 @@ private:
     QSet<QString> m_pendingCommits;
     QSet<QString> m_pendingAdds;
     int m_pendingUpdates = 0;
+    // Per-scan counters for the completion summary log line.
+    int m_scanAdds = 0;
+    int m_scanCommits = 0;
 
     // Highest revision this engine has committed locally. A local commit
     // bumps the server HEAD but not the working-copy root node's revision,

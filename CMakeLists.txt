@@ -5,6 +5,7 @@ project(SvnSyncDrive VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.11 REQUIRED COMPONENTS Widgets Network Sql)
 
@@ -102,6 +103,8 @@ endfunction()
 # ── GUI application ───────────────────────────────────────────────────────
 add_executable(svnsyncdrive
     src/main.cpp
+    src/app.rc
+    src/resources.qrc
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
     src/ui/RepoListPanel.cpp
@@ -125,6 +128,10 @@ target_link_libraries(svnsyncdrive PRIVATE
     Qt6::Widgets
     Qt6::Network
 )
+# GUI application: no console window (/subsystem:windows via WIN32_EXECUTABLE,
+# with Qt6::EntryPointPrivate providing the WinMain entry point).
+set_target_properties(svnsyncdrive PROPERTIES WIN32_EXECUTABLE TRUE)
+target_link_libraries(svnsyncdrive PRIVATE Qt6::EntryPointPrivate)
 copy_libsvn_runtime_dlls(svnsyncdrive)
 deploy_qt(svnsyncdrive)
 

@@ -51,9 +51,19 @@ RepoListPanel::RepoListPanel(QWidget *parent)
     auto *addButton = new QPushButton(QStringLiteral("+ 添加仓库"), this);
     auto *settingsButton = new QPushButton(QStringLiteral("⚙ 设置"), this);
     auto *aboutButton = new QPushButton(QStringLiteral("ℹ 关于"), this);
-    layout->addWidget(addButton);
-    layout->addWidget(settingsButton);
-    layout->addWidget(aboutButton);
+
+    // Bottom action buttons: 50% of the main layout spacing (3px) and 80%
+    // taller, for easier clicking.
+    auto *actionsLayout = new QVBoxLayout;
+    actionsLayout->setSpacing(3);
+    for (auto *button : { static_cast<QWidget *>(addButton),
+                          static_cast<QWidget *>(settingsButton),
+                          static_cast<QWidget *>(aboutButton) }) {
+        button->setMinimumHeight(
+            qRound(static_cast<QPushButton *>(button)->sizeHint().height() * 1.44));
+        actionsLayout->addWidget(button);
+    }
+    layout->addLayout(actionsLayout);
 
     connect(addButton, &QPushButton::clicked, this, &RepoListPanel::addRequested);
     connect(settingsButton, &QPushButton::clicked, this, &RepoListPanel::settingsRequested);

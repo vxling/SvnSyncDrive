@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QIcon>
 
 #include "core/Repository.h"
 #include "ui/MainWindow.h"
@@ -9,6 +10,7 @@ int main(int argc, char *argv[])
     app.setApplicationName("SvnSyncDrive");
     app.setOrganizationName("SvnSyncDrive");
     app.setApplicationVersion("0.2.0");
+    app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
 
     MainWindow window;
     window.show();

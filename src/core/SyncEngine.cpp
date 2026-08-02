@@ -149,7 +149,12 @@ void SyncEngine::enqueueFileChange(const QString &path)
                 CommandItem del;
                 del.command = Command::Delete;
                 del.path = path;
-                submit(del);
+                submit(del, [this, path](const CommandResult &dr) {
+                    if (dr.success)
+                        notify(tr("已删除: %1").arg(path));
+                    else
+                        notify(tr("删除失败: %1（%2）").arg(path).arg(dr.error));
+                });
             }
         });
     }
@@ -162,6 +167,8 @@ void SyncEngine::scanAndCommit()
     if (m_scanning)
         return;
     m_scanning = true;
+    m_scanAdds = 0;
+    m_scanCommits = 0;
 
     CommandItem statusItem;
     statusItem.command = Command::Status;
@@ -207,8 +214,14 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
             CommandItem add;
             add.command = Command::Add;
             add.path = p;
-            submit(add, [this, p](const CommandResult &) {
+            submit(add, [this, p](const CommandResult &r) {
                 m_pendingAdds.remove(p);
+                if (r.success) {
+                    ++m_scanAdds;
+                    notify(tr("已添加: %1").arg(p));
+                } else {
+                    notify(tr("添加失败: %1（%2）").arg(p).arg(r.error));
+                }
                 onAutoAddCompleted();
             });
         }
@@ -225,8 +238,14 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
         commit.message = commitMessage(g.dir, g.count, g.firstFile);
         submit(commit, [this, g](const CommandResult &r) {
             m_pendingCommits.remove(g.dir);
-            if (r.success && r.revision > 0)
+            if (r.success && r.revision > 0) {
                 m_lastLocalRev = qMax(m_lastLocalRev, r.revision);
+                ++m_scanCommits;
+                notify(tr("自动提交: %1（%2 个文件）→ r%3")
+                           .arg(g.dir).arg(g.count).arg(r.revision));
+            } else {
+                notify(tr("提交失败: %1（%2）").arg(g.dir).arg(r.error));
+            }
             onCommitCompleted();
         });
     }
@@ -261,7 +280,8 @@ void SyncEngine::finishScan()
         return;
     m_scanning = false;
     emit filesChanged();
-    notify(tr("批量同步完成"));
+    notify(tr("批量同步完成：新增 %1 个文件，提交 %2 个目录")
+               .arg(m_scanAdds).arg(m_scanCommits));
     if (m_rescanPending) {
         m_rescanPending = false;
         scanAndCommit();
@@ -371,10 +391,13 @@ void SyncEngine::fullSync()
     submit(upd, [this](const CommandResult &r) {
         if (!r.success)
             notify(tr("定时全量同步更新失败: %1").arg(r.error));
-        detectConflicts([this]() {
+        detectConflicts([this, r]() {
             emit filesChanged();
             m_fullSyncing = false;
-            notify(tr("定时全量同步完成"));
+            if (r.success && r.revision > 0)
+                notify(tr("定时全量同步完成（更新到 r%1）").arg(r.revision));
+            else
+                notify(tr("定时全量同步完成"));
             scanAndCommit();
         });
     });
@@ -410,21 +433,27 @@ void SyncEngine::startUpdateInChunks(qlonglong serverRev, qlonglong localRev)
             upd.path = m_repo.path;
             upd.updatePaths = { dir };
             ++m_pendingUpdates;
-            submit(upd, [this, serverRev, localRev](const CommandResult &) {
+            submit(upd, [this, serverRev, localRev, remotePaths](const CommandResult &) {
                 --m_pendingUpdates;
                 if (m_pendingUpdates <= 0)
-                    afterUpdateDone(serverRev, localRev);
+                    afterUpdateDone(serverRev, localRev, remotePaths);
             });
         }
         if (m_pendingUpdates == 0)
-            afterUpdateDone(serverRev, localRev);
+            afterUpdateDone(serverRev, localRev, remotePaths);
     });
 }
 
-void SyncEngine::afterUpdateDone(qlonglong serverRev, qlonglong localRev)
+void SyncEngine::afterUpdateDone(qlonglong serverRev, qlonglong localRev,
+                                 const QStringList &remotePaths)
 {
-    detectConflicts([this, serverRev, localRev]() {
-        notify(tr("已从服务器更新 r%1 → r%2").arg(localRev).arg(serverRev));
+    detectConflicts([this, serverRev, localRev, remotePaths]() {
+        const QString pathsText = remotePaths.join(QStringLiteral("、"));
+        if (remotePaths.isEmpty())
+            notify(tr("已从服务器更新 r%1 → r%2").arg(localRev).arg(serverRev));
+        else
+            notify(tr("已从服务器更新 r%1 → r%2：%3")
+                       .arg(localRev).arg(serverRev).arg(pathsText));
         emit filesChanged();
         m_polling = false;
     });

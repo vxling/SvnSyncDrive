@@ -35,8 +35,8 @@ MainWindow::MainWindow(QWidget *parent)
     layout->setSpacing(8);
 
     m_sidebar = new RepoListPanel(central);
-    m_sidebar->setMinimumWidth(220);
-    m_sidebar->setMaximumWidth(340);
+    m_sidebar->setMinimumWidth(176);
+    m_sidebar->setMaximumWidth(272);
     layout->addWidget(m_sidebar);
 
     m_pages = new QStackedWidget(central);
@@ -188,6 +188,7 @@ void MainWindow::onRemoveRequested(const QString &name)
 void MainWindow::onAddRequested()
 {
     AddRepoDialog dialog(false, this);
+    dialog.setTrustServerCertificate(m_manager->config().trustServerCertificate);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const svnsync::Repository repo = dialog.repository();
@@ -354,6 +355,7 @@ RepoDetailPage *MainWindow::pageFor(const QString &name)
             return;
         AddRepoDialog dialog(true, this);
         dialog.setRepository(*repo);
+        dialog.setTrustServerCertificate(m_manager->config().trustServerCertificate);
         if (dialog.exec() != QDialog::Accepted)
             return;
         const auto updated = dialog.repository();

@@ -65,7 +65,7 @@ bool RepoWatcher::start(const QString &path, int debounceMs)
     if (!QFileInfo::exists(path))
         return false;
     m_watchPath = QDir::toNativeSeparators(path);
-    m_debounceMs = qMax(200, debounceMs);
+    m_debounceMs = qMax(1000, debounceMs);
     m_stopRequested = false;
     m_lastEmitMs = nowMs();
     m_running = true;
