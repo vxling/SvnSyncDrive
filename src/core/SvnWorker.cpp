@@ -333,15 +333,37 @@ private:
             for (const auto &p : item.updatePaths)
                 paths.push_back(p.toStdString());
         }
+
+        int updatedCount = 0;
+        m_client.setNotifyCallback([&updatedCount](const SvnPlus::SvnNotifyEvent &e) {
+            using A = SvnPlus::SvnNotifyAction;
+            switch (e.action) {
+            case A::UpdateAdd:
+            case A::UpdateUpdate:
+            case A::UpdateDelete:
+            case A::UpdateReplace:
+            case A::UpdateShadowedAdd:
+            case A::UpdateShadowedUpdate:
+            case A::UpdateShadowedDelete:
+                ++updatedCount;
+                break;
+            default:
+                break;
+            }
+        });
+
         std::vector<SvnPlus::SvnRevision> revisions;
         const SvnPlus::SvnError err = m_client.update(
             paths, SvnPlus::SvnRevision::head(), SvnPlus::SvnDepth::Infinity,
             false, false, &revisions);
+        m_client.setNotifyCallback({});
+
         if (!err.ok()) {
             result = fail(item, err);
             return;
         }
         result = makeResult(item, true);
+        result.value = QString::number(updatedCount);
         if (!revisions.empty())
             result.revision = revisions.back().number();
     }
@@ -551,6 +573,12 @@ void SvnWorker::logModify(const CommandItem &item, const CommandResult &result)
             message += QStringLiteral(" -> ok r%1").arg(result.revision);
         else
             message += QStringLiteral(" -> ok");
+        if (item.command == Command::Update) {
+            bool countOk = false;
+            const int count = result.value.toInt(&countOk);
+            if (countOk && count > 0)
+                message += QStringLiteral(" (%1 items)").arg(count);
+        }
         AppLog::info(message);
     } else {
         message += QStringLiteral(" -> failed: ") + result.error;

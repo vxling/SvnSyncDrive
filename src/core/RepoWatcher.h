@@ -33,6 +33,14 @@ public:
     bool start(const QString &path, int debounceMs = 2000);
     void stop();
 
+    /** Suspend event delivery: while suspended, filesystem events are
+     *  ignored (not accumulated, not emitted). Used to silence the watcher
+     *  while `svn update` is rewriting the working copy, so its own writes
+     *  are never mistaken for user edits. */
+    void setSuspended(bool suspended);
+
+    bool isSuspended() const { return m_suspended.load(); }
+
     bool isWatching() const { return m_running.load(); }
 
 signals:
@@ -48,6 +56,7 @@ private:
 
     std::atomic<bool> m_running{ false };
     std::atomic<bool> m_stopRequested{ false };
+    std::atomic<bool> m_suspended{ false };
     std::thread m_thread;
 
     // Touched only on the watcher thread.

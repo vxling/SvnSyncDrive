@@ -89,7 +89,7 @@ private:
     void fullSync();
     void startUpdateInChunks(qlonglong serverRev, qlonglong localRev);
     void afterUpdateDone(qlonglong serverRev, qlonglong localRev,
-                         const QStringList &remotePaths);
+                         const QStringList &remotePaths, int updatedCount);
     void detectConflicts(const std::function<void()> &done);
 
     static QStringList mergeToDirs(const QStringList &paths, const QString &repoRoot);

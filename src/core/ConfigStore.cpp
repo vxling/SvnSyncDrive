@@ -203,6 +203,8 @@ GlobalConfig ConfigStore::loadGlobalConfig()
             config.trustServerCertificate = value.toInt() != 0;
         else if (key == QStringLiteral("minimizeToTray"))
             config.minimizeToTray = value.toInt() != 0;
+        else if (key == QStringLiteral("startMinimizedToTray"))
+            config.startMinimizedToTray = value.toInt() != 0;
         else if (key == QStringLiteral("maxLogsPerRepo"))
             config.maxLogsPerRepo = value.toInt();
     }
@@ -238,6 +240,7 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         put(QStringLiteral("autoAddUnversioned"), QString::number(config.autoAddUnversioned));
         put(QStringLiteral("trustServerCertificate"), QString::number(config.trustServerCertificate));
         put(QStringLiteral("minimizeToTray"), QString::number(config.minimizeToTray));
+        put(QStringLiteral("startMinimizedToTray"), QString::number(config.startMinimizedToTray));
         put(QStringLiteral("maxLogsPerRepo"), QString::number(config.maxLogsPerRepo));
     }
 

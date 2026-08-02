@@ -27,5 +27,6 @@ private:
     QCheckBox *m_autoAdd = nullptr;
     QCheckBox *m_trustCert = nullptr;
     QCheckBox *m_minimizeToTray = nullptr;
+    QCheckBox *m_startMinimizedToTray = nullptr;
     QSpinBox *m_maxLogsPerRepo = nullptr;
 };

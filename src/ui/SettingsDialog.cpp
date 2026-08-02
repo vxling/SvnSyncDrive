@@ -41,11 +41,14 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_trustCert = new QCheckBox(QStringLiteral("信任自签名 / 未知证书"), this);
     m_minimizeToTray = new QCheckBox(QStringLiteral("关闭窗口时最小化到系统托盘"), this);
     m_minimizeToTray->setToolTip(QStringLiteral("开启后常驻后台同步，可随时从托盘恢复窗口"));
+    m_startMinimizedToTray = new QCheckBox(QStringLiteral("启动时最小化到系统托盘（不显示窗口）"), this);
+    m_startMinimizedToTray->setToolTip(QStringLiteral("开启后启动程序不显示主窗口，直接常驻系统托盘"));
 
     layout->addLayout(form);
     layout->addWidget(m_autoAdd);
     layout->addWidget(m_trustCert);
     layout->addWidget(m_minimizeToTray);
+    layout->addWidget(m_startMinimizedToTray);
 
     auto *hint = new QLabel(
         QStringLiteral("更改将应用到所有正在同步的仓库。"), this);
@@ -68,6 +71,7 @@ void SettingsDialog::setConfig(const svnsync::GlobalConfig &config)
     m_autoAdd->setChecked(config.autoAddUnversioned);
     m_trustCert->setChecked(config.trustServerCertificate);
     m_minimizeToTray->setChecked(config.minimizeToTray);
+    m_startMinimizedToTray->setChecked(config.startMinimizedToTray);
     m_maxLogsPerRepo->setValue(config.maxLogsPerRepo);
 }
 
@@ -79,6 +83,7 @@ svnsync::GlobalConfig SettingsDialog::config() const
     config.autoAddUnversioned = m_autoAdd->isChecked();
     config.trustServerCertificate = m_trustCert->isChecked();
     config.minimizeToTray = m_minimizeToTray->isChecked();
+    config.startMinimizedToTray = m_startMinimizedToTray->isChecked();
     config.maxLogsPerRepo = m_maxLogsPerRepo->value();
     return config;
 }

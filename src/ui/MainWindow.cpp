@@ -108,6 +108,11 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow() = default;
 
+bool MainWindow::startMinimizedToTray() const
+{
+    return m_trayIcon && m_manager->config().startMinimizedToTray;
+}
+
 void MainWindow::startRepository(const svnsync::Repository &repository)
 {
     m_manager->addRepository(repository);

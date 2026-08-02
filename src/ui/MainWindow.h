@@ -30,6 +30,12 @@ public:
     /** Live mode entry point: add a repo from the command line and select it. */
     void startRepository(const svnsync::Repository &repository);
 
+    /** Whether the app should launch hidden in the system tray. */
+    bool startMinimizedToTray() const;
+
+    /** Restore the main window from the system tray. */
+    void showWindowFromTray();
+
 private:
     void rebuildSidebar();
     void selectRepository(const QString &name);
@@ -37,7 +43,6 @@ private:
     void onRemoveRequested(const QString &name);
     void onAddRequested();
     void onSettingsRequested();
-    void showWindowFromTray();
     void quitApplication();
     void setupTrayIcon();
     void closeEvent(QCloseEvent *event) override;

@@ -145,7 +145,11 @@ void SyncEngine::enqueueFileChange(const QString &path)
         query.path = path;
 
         submit(query, [this, path](const CommandResult &r) {
-            if (r.success && r.value == QStringLiteral("true")) {
+            // Re-check existence: the path may have been recreated (e.g. by
+            // an in-flight `svn update` replacing it) between the watcher
+            // event and this query, in which case it must NOT be deleted.
+            if (r.success && r.value == QStringLiteral("true")
+                && !QFileInfo::exists(path)) {
                 CommandItem del;
                 del.command = Command::Delete;
                 del.path = path;
@@ -383,21 +387,39 @@ void SyncEngine::fullSync()
     if (m_fullSyncing || m_polling || m_scanning)
         return;
     m_fullSyncing = true;
+    // Watchdog: if a previous cycle ever left the watcher suspended (should
+    // not happen, but recover defensively), restore it before proceeding so
+    // monitoring is never silently lost.
+    if (m_watcher->isSuspended()) {
+        m_watcher->setSuspended(false);
+        notify(tr("文件监听处于挂起状态，已自动恢复。"));
+    }
+    // Silence the watcher while update rewrites the working copy; resumed in
+    // the update callback (both success and failure).
+    m_watcher->setSuspended(true);
 
     CommandItem upd;
     upd.command = Command::Update;
     upd.path = m_repo.path;
     upd.bypassDedup = true;  // must run and report, even if a user update is queued
     submit(upd, [this](const CommandResult &r) {
+        m_watcher->setSuspended(false);
         if (!r.success)
             notify(tr("定时全量同步更新失败: %1").arg(r.error));
         detectConflicts([this, r]() {
             emit filesChanged();
             m_fullSyncing = false;
-            if (r.success && r.revision > 0)
-                notify(tr("定时全量同步完成（更新到 r%1）").arg(r.revision));
-            else
+            bool countOk = false;
+            const int count = r.value.toInt(&countOk);
+            if (r.success && r.revision > 0) {
+                if (countOk && count > 0)
+                    notify(tr("定时全量同步完成（更新到 r%1，%2 个文件/目录）")
+                               .arg(r.revision).arg(count));
+                else
+                    notify(tr("定时全量同步完成（更新到 r%1）").arg(r.revision));
+            } else {
                 notify(tr("定时全量同步完成"));
+            }
             scanAndCommit();
         });
     });
@@ -426,34 +448,56 @@ void SyncEngine::startUpdateInChunks(qlonglong serverRev, qlonglong localRev)
         }
 
         const QStringList dirs = mergeToDirs(remotePaths, m_repo.path);
+        auto totalUpdated = std::make_shared<int>(0);
         m_pendingUpdates = 0;
+        // Silence the watcher while update rewrites the working copy, so its
+        // own writes never trigger a scan (which could mistake them for user
+        // edits). Resumed in afterUpdateDone.
+        m_watcher->setSuspended(true);
         for (const auto &dir : dirs) {
             CommandItem upd;
             upd.command = Command::Update;
             upd.path = m_repo.path;
             upd.updatePaths = { dir };
+            // Never dedup-dropped: every chunk must report so the last one
+            // reaches afterUpdateDone, which resumes the suspended watcher.
+            // A dropped item would never fire its callback, leaving
+            // m_pendingUpdates > 0 and the watcher suspended forever.
+            upd.bypassDedup = true;
             ++m_pendingUpdates;
-            submit(upd, [this, serverRev, localRev, remotePaths](const CommandResult &) {
+            submit(upd, [this, serverRev, localRev, remotePaths, totalUpdated](
+                            const CommandResult &ur) {
+                bool countOk = false;
+                const int count = ur.value.toInt(&countOk);
+                if (countOk && count > 0)
+                    *totalUpdated += count;
                 --m_pendingUpdates;
                 if (m_pendingUpdates <= 0)
-                    afterUpdateDone(serverRev, localRev, remotePaths);
+                    afterUpdateDone(serverRev, localRev, remotePaths, *totalUpdated);
             });
         }
         if (m_pendingUpdates == 0)
-            afterUpdateDone(serverRev, localRev, remotePaths);
+            afterUpdateDone(serverRev, localRev, remotePaths, 0);
     });
 }
 
 void SyncEngine::afterUpdateDone(qlonglong serverRev, qlonglong localRev,
-                                 const QStringList &remotePaths)
+                                 const QStringList &remotePaths, int updatedCount)
 {
-    detectConflicts([this, serverRev, localRev, remotePaths]() {
-        const QString pathsText = remotePaths.join(QStringLiteral("、"));
-        if (remotePaths.isEmpty())
-            notify(tr("已从服务器更新 r%1 → r%2").arg(localRev).arg(serverRev));
-        else
-            notify(tr("已从服务器更新 r%1 → r%2：%3")
-                       .arg(localRev).arg(serverRev).arg(pathsText));
+    m_watcher->setSuspended(false);
+    detectConflicts([this, serverRev, localRev, remotePaths, updatedCount]() {
+        const QString base = tr("已从服务器更新 r%1 → r%2")
+                                 .arg(localRev).arg(serverRev);
+        if (updatedCount > 0) {
+            const QString pathsText = remotePaths.join(QStringLiteral("、"));
+            if (pathsText.size() <= 80)
+                notify(tr("%1：%2（%3 个文件/目录）")
+                           .arg(base, pathsText).arg(updatedCount));
+            else
+                notify(tr("%1：%2 个文件/目录").arg(base).arg(updatedCount));
+        } else {
+            notify(base);
+        }
         emit filesChanged();
         m_polling = false;
     });

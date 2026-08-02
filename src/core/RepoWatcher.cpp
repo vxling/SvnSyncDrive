@@ -65,7 +65,7 @@ bool RepoWatcher::start(const QString &path, int debounceMs)
     if (!QFileInfo::exists(path))
         return false;
     m_watchPath = QDir::toNativeSeparators(path);
-    m_debounceMs = qMax(1000, debounceMs);
+    m_debounceMs = qMax(2000, debounceMs);
     m_stopRequested = false;
     m_lastEmitMs = nowMs();
     m_running = true;
@@ -79,6 +79,11 @@ void RepoWatcher::stop()
     if (m_thread.joinable())
         m_thread.join();
     m_running = false;
+}
+
+void RepoWatcher::setSuspended(bool suspended)
+{
+    m_suspended = suspended;
 }
 
 void RepoWatcher::run()
@@ -159,7 +164,7 @@ void RepoWatcher::run()
                 const QString name = QString::fromWCharArray(record->FileName, nameChars);
                 const QString full =
                     QDir::fromNativeSeparators(m_watchPath + QLatin1Char('/') + name);
-                if (!shouldIgnore(full))
+                if (!shouldIgnore(full) && !m_suspended.load())
                     m_pending.insert(full);
                 if (record->NextEntryOffset == 0)
                     break;
@@ -192,7 +197,7 @@ void RepoWatcher::run()
 
 void RepoWatcher::collectAndMaybeEmit()
 {
-    if (m_pending.isEmpty())
+    if (m_suspended.load() || m_pending.isEmpty())
         return;
     // Throttle, not an idle-timeout: emit at most one batch per debounceMs.
     // An idle-timeout means continuous filesystem activity (e.g. SVN writing

@@ -26,6 +26,10 @@ struct GlobalConfig
      *  keeping the background sync alive. */
     bool minimizeToTray = true;
 
+    /** Start hidden in the system tray on launch instead of showing the
+     *  main window. */
+    bool startMinimizedToTray = true;
+
     /** Maximum number of log lines kept per repository. */
     int maxLogsPerRepo = 10000;
 };
