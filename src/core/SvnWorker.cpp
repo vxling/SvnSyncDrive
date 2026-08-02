@@ -492,6 +492,15 @@ void SvnWorker::workerLoop()
             });
             if (m_stopping)
                 break;
+            // Re-apply after the wait: a credential change that arrived while
+            // this thread slept in m_cv.wait does not re-run the block above
+            // (it is executed once per loop iteration, before the wait), so
+            // the next item could otherwise run with stale empty credentials.
+            if (m_credsDirty) {
+                m_runner->setCredentials(m_username, m_password);
+                m_runner->setTrustServerCertificate(m_trustCert);
+                m_credsDirty = false;
+            }
             item = takeNextLocked();
         }
 
