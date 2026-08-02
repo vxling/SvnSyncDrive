@@ -14,8 +14,10 @@
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QHash>
 
 #include <chrono>
+#include <utility>
 #include <vector>
 
 namespace svnsync {
@@ -203,8 +205,13 @@ void RepoWatcher::run()
     }
 #else
     // Portable fallback (Linux / macOS): watch the directory tree with
-    // QFileSystemWatcher. QFileSystemWatcher does not recurse, so subdirectories
-    // are added up front and re-scanned whenever a directory changes.
+    // QFileSystemWatcher, then diff the tree against a snapshot to report the
+    // exact file paths that changed (parity with the Windows backend).
+    //
+    // QFileSystemWatcher only signals directory-level events (create / delete /
+    // rename of an entry) - content edits of existing files produce no signal,
+    // and file paths are never reported. The snapshot diff therefore also runs
+    // on a cadence so modified files are picked up within a couple of seconds.
     //
     // QFileSystemWatcher is powered by a QSocketNotifier that only registers
     // with a Qt event dispatcher already present in the current thread. This
@@ -217,32 +224,69 @@ void RepoWatcher::run()
         boot.exec();
     }
 
-    const auto onFsEvent = [this](const QString &path) {
-        const QString normalized = QDir::fromNativeSeparators(path);
-        if (!shouldIgnore(normalized) && !m_suspended.load())
-            m_pending.insert(normalized);
-        collectAndMaybeEmit();
+    // Snapshot of every file under the watch root (path -> mtime/size).
+    QHash<QString, std::pair<qint64, qint64>> snapshot;
+    auto scanTree = [this]() {
+        QHash<QString, std::pair<qint64, qint64>> next;
+        QDirIterator it(m_watchPath, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString path = QDir::fromNativeSeparators(it.next());
+            if (shouldIgnore(path))
+                continue;
+            const QFileInfo info(path);
+            next.insert(path,
+                        {info.lastModified().toMSecsSinceEpoch(), info.size()});
+        }
+        return next;
+    };
+    auto diffAndCollect = [this, &snapshot, &scanTree]() {
+        if (m_suspended.load())
+            return;  // keep the snapshot stale so changes are reported on resume
+        const auto fresh = scanTree();
+        QStringList changed;
+        for (auto old = snapshot.cbegin(); old != snapshot.cend(); ++old) {
+            const auto now = fresh.find(old.key());
+            if (now == fresh.cend())
+                changed << old.key();                 // deleted
+            else if (now.value() != old.value())
+                changed << old.key();                 // modified
+        }
+        for (auto now = fresh.cbegin(); now != fresh.cend(); ++now)
+            if (!snapshot.contains(now.key()))
+                changed << now.key();                 // added
+        snapshot = fresh;
+        for (const auto &p : changed)
+            m_pending.insert(p);
     };
 
+    snapshot = scanTree();
+
+    std::atomic_bool dirty = false;
     QFileSystemWatcher watcher;
     addDirTree(watcher, m_watchPath);
     QObject::connect(&watcher, &QFileSystemWatcher::directoryChanged,
-                     &watcher, [this, &watcher, onFsEvent](const QString &path) {
+                     &watcher, [&watcher, &dirty](const QString &path) {
                          addDirTree(watcher, path);
-                         onFsEvent(path);
+                         dirty = true;
                      });
     QObject::connect(&watcher, &QFileSystemWatcher::fileChanged,
-                     &watcher, [onFsEvent](const QString &path) {
-                         onFsEvent(path);
+                     &watcher, [&dirty](const QString &) {
+                         dirty = true;
                      });
 
     QElapsedTimer throttle;
     throttle.start();
+    int ticks = 0;
     while (!m_stopRequested.load()) {
         // Drive the watcher's signals and flush pending changes on a cadence
         // so the debounce guarantee holds even without filesystem activity.
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
         if (throttle.elapsed() >= 500) {
+            // Rescan immediately after a directory event; also rescan every
+            // four ticks (~2s) to catch content edits QFileSystemWatcher
+            // never reports.
+            if (dirty.exchange(false) || (++ticks % 4) == 0)
+                diffAndCollect();
             collectAndMaybeEmit();
             throttle.restart();
         }
