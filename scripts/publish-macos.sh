@@ -41,7 +41,7 @@ cmake --build "$BUILD" --parallel
 
 # Core sanity check: console unit tests (no server needed, exits non-zero on
 # failure). The build rpath above lets it load the staged libsvn dylibs.
-"$BUILD/tests/coretest/synccoretest"
+"$BUILD/synccoretest"
 
 # Bundle the Qt frameworks and plugins into the .app.
 "$QT_ROOT/bin/macdeployqt" "$APP_DIR"
