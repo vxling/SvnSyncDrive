@@ -38,7 +38,6 @@ public:
 
 signals:
     void syncRequested();
-    void toggleStateRequested();
     void configureRequested();
     void removeRequested();
     void conflictScanRequested();

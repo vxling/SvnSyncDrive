@@ -38,15 +38,11 @@ public:
     void setRepository(const QString &wcPath);
     void refresh();
 
-    /** Keep the enable/disable sync button label in sync with repo state. */
-    void setToggleState(svnsync::RepoState state);
-
     int itemCount() const;
 
 signals:
     void statusTextChanged(const QString &text);
     void syncRequested();
-    void toggleStateRequested();
     void conflictScanRequested();
 
 private:
@@ -100,6 +96,5 @@ private:
 
     QLabel *m_pathLabel = nullptr;
     QPushButton *m_refreshButton = nullptr;
-    QPushButton *m_toggleButton = nullptr;
     QTableWidget *m_table = nullptr;
 };

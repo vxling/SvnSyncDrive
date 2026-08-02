@@ -193,12 +193,10 @@ FileBrowser::FileBrowser(QWidget *parent)
     buttonsRow->setSpacing(6);
 
     auto *syncButton = new QPushButton(QStringLiteral("🔁 立即同步"), toolbar);
-    m_toggleButton = new QPushButton(QStringLiteral("▶ 启用同步"), toolbar);
     auto *conflictButton = new QPushButton(QStringLiteral("🛠 解决冲突"), toolbar);
     m_refreshButton = new QPushButton(QStringLiteral("🔄 刷新"), toolbar);
 
     buttonsRow->addWidget(syncButton);
-    buttonsRow->addWidget(m_toggleButton);
     buttonsRow->addWidget(conflictButton);
     buttonsRow->addWidget(m_refreshButton);
     buttonsRow->addStretch(1);
@@ -230,7 +228,6 @@ FileBrowser::FileBrowser(QWidget *parent)
     m_table->setContextMenuPolicy(Qt::CustomContextMenu);
 
     connect(syncButton, &QPushButton::clicked, this, &FileBrowser::syncRequested);
-    connect(m_toggleButton, &QPushButton::clicked, this, &FileBrowser::toggleStateRequested);
     connect(conflictButton, &QPushButton::clicked, this, &FileBrowser::conflictScanRequested);
     connect(m_refreshButton, &QPushButton::clicked, this, &FileBrowser::refresh);
     connect(m_table, &QTableWidget::customContextMenuRequested, this,
@@ -264,21 +261,6 @@ void FileBrowser::setRepository(const QString &wcPath)
     m_wcRoot = QDir::cleanPath(QDir::fromNativeSeparators(wcPath));
     m_currentDir = m_wcRoot;
     refresh();
-}
-
-void FileBrowser::setToggleState(svnsync::RepoState state)
-{
-    if (!m_toggleButton)
-        return;
-    // AuthFailed is stopped (like Deactive); its toggle acts as a manual
-    // retry that restarts the engine with the current (possibly fixed)
-    // credentials.
-    const bool running = state == svnsync::RepoState::Background
-        || state == svnsync::RepoState::Active
-        || state == svnsync::RepoState::Disconnected;
-    m_toggleButton->setText(running
-        ? QStringLiteral("⏸ 停用同步")
-        : QStringLiteral("▶ 启用同步"));
 }
 
 void FileBrowser::refresh()

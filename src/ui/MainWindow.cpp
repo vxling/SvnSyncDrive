@@ -348,22 +348,6 @@ RepoDetailPage *MainWindow::pageFor(const QString &name)
     connect(page, &RepoDetailPage::syncRequested, this, [this, name] {
         m_manager->syncNow(name);
     });
-    connect(page, &RepoDetailPage::toggleStateRequested, this, [this, name] {
-        const auto *r = m_manager->repository(name);
-        if (!r)
-            return;
-        // Enabling promotes the repo to the monitored set; disabling demotes
-        // it to the bottom of the list where it stays stopped.
-        if (r->running())
-            m_manager->demote(name);
-        else
-            m_manager->promote(name);
-        if (m_selectedName == name) {
-            const auto *cur = m_manager->repository(name);
-            if (cur && cur->running())
-                m_manager->setState(name, svnsync::RepoState::Active);
-        }
-    });
     connect(page, &RepoDetailPage::removeRequested, this, [this, name] {
         onRemoveRequested(name);
     });

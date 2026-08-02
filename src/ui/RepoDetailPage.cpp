@@ -85,8 +85,6 @@ RepoDetailPage::RepoDetailPage(QWidget *parent)
     connect(removeButton, &QPushButton::clicked, this, &RepoDetailPage::removeRequested);
     connect(m_browser, &FileBrowser::syncRequested,
             this, &RepoDetailPage::syncRequested);
-    connect(m_browser, &FileBrowser::toggleStateRequested,
-            this, &RepoDetailPage::toggleStateRequested);
     connect(m_browser, &FileBrowser::conflictScanRequested,
             this, &RepoDetailPage::conflictScanRequested);
 
@@ -114,7 +112,6 @@ void RepoDetailPage::setState(svnsync::RepoState state)
     m_stateLabel->setStyleSheet(
         QStringLiteral("color: %1; font-weight: bold;")
             .arg(stateColor(state).name()));
-    m_browser->setToggleState(state);
 }
 
 void RepoDetailPage::appendLog(const QString &message)
