@@ -480,12 +480,26 @@ void FileBrowser::createNewEntry(bool isDir)
     if (!ok || name.trimmed().isEmpty())
         return;
 
-    const QString target =
-        QDir::cleanPath(m_currentDir + QLatin1Char('/') + name.trimmed());
+    // Windows-style collision handling: if the requested name is taken, pick
+    // "name2", "name3", ... (the counter goes before the file extension).
+    const QString raw = name.trimmed();
+    QString target =
+        QDir::cleanPath(m_currentDir + QLatin1Char('/') + raw);
     if (QFileInfo::exists(target)) {
-        QMessageBox::warning(this, QStringLiteral("新建"),
-                             QStringLiteral("同名文件或文件夹已存在。"));
-        return;
+        const QString stem = isDir
+            ? raw
+            : QFileInfo(raw).completeBaseName();
+        const QString ext = isDir ? QString() : QFileInfo(raw).suffix();
+        const int kMaxTries = 1000;
+        int counter = 2;
+        while (QFileInfo::exists(target) && counter <= kMaxTries) {
+            const QString numbered = isDir
+                ? QStringLiteral("%1%2").arg(stem).arg(counter)
+                : QStringLiteral("%1%2.%3").arg(stem).arg(counter).arg(ext);
+            target = QDir::cleanPath(
+                m_currentDir + QLatin1Char('/') + numbered);
+            ++counter;
+        }
     }
 
     bool created = false;
