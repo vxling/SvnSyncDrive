@@ -19,8 +19,10 @@ namespace svnsync {
  * notifications (unlike one-handle-per-directory watchers).
  *
  * Change events are accumulated and delivered as one batch after
- * `debounceMs` of quiet. Paths under ".svn" and temp files are ignored.
- * The watcher auto-reconnects on failure.
+ * `debounceMs` of quiet (debounced, so rapid saves merge into a single
+ * batch), with a max-wait cap so continuous activity cannot postpone a
+ * batch forever. Paths under ".svn" and temp files are ignored. The
+ * watcher auto-reconnects on failure.
  */
 class RepoWatcher : public QObject
 {
@@ -50,6 +52,7 @@ signals:
 private:
     void run();
     void collectAndMaybeEmit();
+    void noteChange(const QString &path);
 
     QString m_watchPath;
     int m_debounceMs = 2000;
@@ -61,7 +64,8 @@ private:
 
     // Touched only on the watcher thread.
     QSet<QString> m_pending;
-    qint64 m_lastEmitMs = 0;
+    qint64 m_lastChangeMs = 0;   // when the newest pending change arrived
+    qint64 m_firstPendingMs = 0; // when the oldest pending change arrived
 };
 
 } // namespace svnsync

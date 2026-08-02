@@ -286,6 +286,14 @@ static bool testRepoWatcher()
 
     QThread::msleep(300);
     writeFile(root + QStringLiteral("/a.txt"), "hello");
+
+    // Debounce, not throttle: the batch must NOT be emitted right after the
+    // change. With a 700 ms quiet period nothing should arrive within ~250 ms.
+    const bool premature = waitUntil([&] { return !batch.isEmpty(); }, 250);
+    check(!premature, "no batch is emitted before the debounce quiet period");
+
+    // A second change within the quiet window must merge into the same batch.
+    QThread::msleep(300);
     writeFile(root + QStringLiteral("/sub/inside.txt"), "world");
 
     const bool gotBatch = waitUntil([&] { return !batch.isEmpty(); }, 8000);

@@ -87,7 +87,8 @@ bool RepoWatcher::start(const QString &path, int debounceMs)
     m_watchPath = QDir::toNativeSeparators(path);
     m_debounceMs = qMax(2000, debounceMs);
     m_stopRequested = false;
-    m_lastEmitMs = nowMs();
+    m_lastChangeMs = nowMs();
+    m_firstPendingMs = nowMs();
     m_running = true;
     m_thread = std::thread(&RepoWatcher::run, this);
     return true;
@@ -185,7 +186,7 @@ void RepoWatcher::run()
                 const QString full =
                     QDir::fromNativeSeparators(m_watchPath + QLatin1Char('/') + name);
                 if (!shouldIgnore(full) && !m_suspended.load())
-                    m_pending.insert(full);
+                    noteChange(full);
                 if (record->NextEntryOffset == 0)
                     break;
                 ptr += record->NextEntryOffset;
@@ -256,7 +257,7 @@ void RepoWatcher::run()
                 changed << now.key();                 // added
         snapshot = fresh;
         for (const auto &p : changed)
-            m_pending.insert(p);
+            noteChange(p);
     };
 
     snapshot = scanTree();
@@ -310,18 +311,28 @@ void RepoWatcher::collectAndMaybeEmit()
 {
     if (m_suspended.load() || m_pending.isEmpty())
         return;
-    // Throttle, not an idle-timeout: emit at most one batch per debounceMs.
-    // An idle-timeout means continuous filesystem activity (e.g. SVN writing
-    // to the working copy while we sync) keeps resetting the timer and can
-    // postpone a batch indefinitely. With a throttle, a batch is guaranteed
-    // to go out every debounceMs while anything is pending, so a busy working
-    // copy still makes progress.
-    if (nowMs() - m_lastEmitMs < m_debounceMs)
+    const qint64 now = nowMs();
+    // True debounce: wait `debounceMs` of quiet after the last change, so
+    // rapid successive saves merge into one batch. The max-wait cap keeps the
+    // progress guarantee the old throttle had: if changes keep arriving
+    // continuously (IDE auto-save, a log file being appended), the quiet
+    // timer would otherwise be reset forever and no batch would ever go out.
+    const bool quietElapsed = now - m_lastChangeMs >= m_debounceMs;
+    const bool capReached =
+        now - m_firstPendingMs >= qMax<qint64>(m_debounceMs * 3, 6000);
+    if (!quietElapsed && !capReached)
         return;
-    m_lastEmitMs = nowMs();
     const QStringList batch = m_pending.values();
     m_pending.clear();
     emit filesChanged(batch);
+}
+
+void RepoWatcher::noteChange(const QString &path)
+{
+    if (m_pending.isEmpty())
+        m_firstPendingMs = nowMs();
+    m_lastChangeMs = nowMs();
+    m_pending.insert(path);
 }
 
 } // namespace svnsync
