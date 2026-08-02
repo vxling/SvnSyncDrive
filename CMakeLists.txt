@@ -40,6 +40,15 @@ set(SVNPLUS_LIBS
     "${SVN_APRUTIL_LIBRARY}"
 )
 
+# ── OpenSSL (credential encryption) ─────────────────────────────────────────
+# The app encrypts stored SVN passwords with AES-256-GCM via libcrypto. On
+# Windows the dev box pulls OpenSSL through vcpkg inside the LibSVNPlus build
+# tree; point find_package at it unless OPENSSL_ROOT_DIR is given explicitly.
+if(WIN32 AND NOT DEFINED OPENSSL_ROOT_DIR)
+    set(OPENSSL_ROOT_DIR "${LIBSVNPLUS_ROOT}/../vcpkg_installed/x64-windows")
+endif()
+find_package(OpenSSL REQUIRED)
+
 # ── core library (no GUI dependency) ──────────────────────────────────────
 add_library(svnsync_core STATIC
     src/core/SvnCommand.cpp
@@ -48,6 +57,7 @@ add_library(svnsync_core STATIC
     src/core/SyncEngine.cpp
     src/core/RepoManager.cpp
     src/core/ConfigStore.cpp
+    src/core/CredCrypto.cpp
     src/core/LogStore.cpp
     src/core/AppLog.cpp
     src/core/Repository.h
@@ -59,6 +69,7 @@ add_library(svnsync_core STATIC
     src/core/SyncEngine.h
     src/core/RepoManager.h
     src/core/ConfigStore.h
+    src/core/CredCrypto.h
     src/core/LogStore.h
     src/core/AppLog.h
     src/core/AppPaths.h
@@ -70,7 +81,7 @@ if(EXISTS "${LIBSVNPLUS_ROOT}/include/subversion-1")
     target_include_directories(svnsync_core PUBLIC "${LIBSVNPLUS_ROOT}/include/subversion-1")
 endif()
 target_compile_definitions(svnsync_core PUBLIC SVNPLUS_STATIC)
-target_link_libraries(svnsync_core PUBLIC Qt6::Core Qt6::Sql PRIVATE ${SVNPLUS_LIBS})
+target_link_libraries(svnsync_core PUBLIC Qt6::Core Qt6::Sql PRIVATE ${SVNPLUS_LIBS} OpenSSL::Crypto)
 
 # Copies the libsvn runtime DLLs next to a target so it can start standalone.
 function(copy_libsvn_runtime_dlls TARGET)

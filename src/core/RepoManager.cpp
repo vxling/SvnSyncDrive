@@ -163,7 +163,11 @@ void RepoManager::setCredentials(const QString &name, const QString &username,
     if (i < 0)
         return;
     m_repos[i].username = username;
-    m_repos[i].password = password;
+    // The edit dialog intentionally leaves the password field empty unless
+    // the user retypes one. Keep the stored password in that case instead of
+    // wiping it from the encrypted store.
+    if (!password.isEmpty())
+        m_repos[i].password = password;
     persist();
     if (SyncEngine *e = engine(name))
         e->setCredentials(username, password);

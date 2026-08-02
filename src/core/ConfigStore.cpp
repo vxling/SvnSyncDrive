@@ -1,6 +1,7 @@
 #include "core/ConfigStore.h"
 
 #include "core/AppPaths.h"
+#include "core/CredCrypto.h"
 
 #include <QSettings>
 #include <QSqlDatabase>
@@ -12,6 +13,7 @@ namespace svnsync {
 
 namespace {
 const QString kConnection = QStringLiteral("svnsync_config");
+const QString kMasterKeyRow = QStringLiteral("__master__");
 QString g_testDbFile;
 
 QString databaseFile()
@@ -46,12 +48,60 @@ void ensureOpen()
         "CREATE TABLE IF NOT EXISTS global ("
         "key TEXT PRIMARY KEY, "
         "value TEXT NOT NULL)"));
+    query.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS credentials ("
+        "name TEXT PRIMARY KEY, "
+        "blob TEXT NOT NULL)"));
 }
 
 QSqlDatabase database()
 {
     ensureOpen();
     return QSqlDatabase::database(kConnection, false);
+}
+
+QByteArray masterKey()
+{
+    QSqlDatabase db = database();
+    if (!db.isValid() || !db.isOpen())
+        return QByteArray();
+
+    QSqlQuery query(db);
+    if (query.exec(QStringLiteral(
+            "SELECT blob FROM credentials WHERE name = '__master__'"))
+        && query.next()) {
+        const QByteArray key =
+            QByteArray::fromBase64(query.value(0).toByteArray());
+        if (key.size() == 32)
+            return key;
+    }
+
+    const QByteArray key = CredCrypto::generateKey();
+    if (key.isEmpty())
+        return QByteArray();
+    query.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO credentials(name, blob) VALUES (:name, :blob)"));
+    query.bindValue(QStringLiteral(":name"), kMasterKeyRow);
+    query.bindValue(QStringLiteral(":blob"),
+                    QString::fromLatin1(key.toBase64()));
+    if (!query.exec())
+        return QByteArray();
+    return key;
+}
+
+QByteArray loadEncryptedPassword(const QString &name)
+{
+    QSqlDatabase db = database();
+    if (!db.isValid() || !db.isOpen())
+        return QByteArray();
+
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral(
+        "SELECT blob FROM credentials WHERE name = :name"));
+    query.bindValue(QStringLiteral(":name"), name);
+    if (!query.exec() || !query.next())
+        return QByteArray();
+    return query.value(0).toByteArray();
 }
 
 } // namespace
@@ -135,14 +185,17 @@ QList<Repository> ConfigStore::loadRepositories()
         repo.path = query.value(1).toString();
         repo.url = query.value(2).toString();
         repo.username = query.value(3).toString();
-        // The password is deliberately NOT persisted here: it is stored
-        // (and encrypted) by libsvn itself in its auth cache, so the app
-        // never touches plaintext passwords. The username is kept so the
-        // configure dialog can show whose credentials are in use.
         repo.state = static_cast<RepoState>(query.value(4).toInt());
         if (!repo.path.isEmpty())
             repositories.append(repo);
     }
+
+    // Restore the per-repo password from the encrypted credentials table;
+    // the master key lives in the same database (defence against casual
+    // reads, not against an attacker who can open the store itself).
+    const QByteArray key = masterKey();
+    for (auto &repo : repositories)
+        repo.password = CredCrypto::decrypt(key, loadEncryptedPassword(repo.name));
     return repositories;
 }
 
@@ -165,16 +218,77 @@ void ConfigStore::saveRepositories(const QList<Repository> &repositories)
             "INSERT INTO repos(name, path, url, username, state) "
             "VALUES (:name, :path, :url, :username, :state)"));
         for (const auto &repo : repositories) {
+            // A default-constructed QString is *null*; the QSQLITE driver then
+            // binds NULL, which trips the NOT NULL column. Normalise to a
+            // (non-null) empty string so an unnamed repo still saves.
+            QString username = repo.username;
+            if (username.isNull())
+                username = QStringLiteral("");
             query.bindValue(QStringLiteral(":name"), repo.name);
             query.bindValue(QStringLiteral(":path"), repo.path);
             query.bindValue(QStringLiteral(":url"), repo.url);
-            query.bindValue(QStringLiteral(":username"), repo.username);
+            query.bindValue(QStringLiteral(":username"), username);
             query.bindValue(QStringLiteral(":state"), static_cast<int>(repo.state));
             if (!query.exec()) {
                 ok = false;
                 break;
             }
         }
+    }
+
+    // Persist each repo's password encrypted (empty password removes the
+    // stored entry), then drop the credential rows of removed repositories.
+    const QByteArray key = masterKey();
+    if (ok && !key.isEmpty()) {
+        QSqlQuery cred(db);
+        cred.prepare(QStringLiteral(
+            "INSERT OR REPLACE INTO credentials(name, blob) VALUES (:name, :blob)"));
+        QSqlQuery del(db);
+        del.prepare(QStringLiteral("DELETE FROM credentials WHERE name = :name"));
+        for (const auto &repo : repositories) {
+            if (repo.password.isEmpty()) {
+                del.bindValue(QStringLiteral(":name"), repo.name);
+                if (!del.exec()) {
+                    ok = false;
+                    break;
+                }
+            } else {
+                const QByteArray blob = CredCrypto::encrypt(key, repo.password);
+                if (blob.isEmpty()) {
+                    ok = false;
+                    break;
+                }
+                cred.bindValue(QStringLiteral(":name"), repo.name);
+                cred.bindValue(QStringLiteral(":blob"), QString::fromLatin1(blob));
+                if (!cred.exec()) {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+
+        // Drop credential rows of removed repositories. The names go into the
+        // SQL as quoted literals (single quotes doubled) - never unquoted, or
+        // SQLite would read them as column names and the whole purge would
+        // fail, rolling back the entire save.
+        QStringList names;
+        for (const auto &repo : repositories)
+            names << repo.name;
+        QStringList quoted;
+        quoted.reserve(names.size());
+        for (const auto &name : names) {
+            QString escaped = name;
+            escaped.replace(QLatin1Char('\''), QStringLiteral("''"));
+            quoted << (QLatin1Char('\'') + escaped + QLatin1Char('\''));
+        }
+        QString sql = QStringLiteral(
+            "DELETE FROM credentials WHERE name <> '__master__'");
+        if (!quoted.isEmpty())
+            sql += QStringLiteral(" AND name NOT IN (")
+                + quoted.join(QLatin1Char(',')) + QStringLiteral(")");
+        QSqlQuery purge(db);
+        if (ok && !purge.exec(sql))
+            ok = false;
     }
 
     if (ok)

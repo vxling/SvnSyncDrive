@@ -1,4 +1,5 @@
 #include "core/ConfigStore.h"
+#include "core/CredCrypto.h"
 #include "core/ICommandRunner.h"
 #include "core/LogStore.h"
 #include "core/RepoManager.h"
@@ -405,6 +406,64 @@ static bool testLogStore()
     return true;
 }
 
+static bool testCredentialEncryption()
+{
+    std::printf("-- Credential encryption & persistence --\n");
+
+    const QByteArray key = CredCrypto::generateKey();
+    check(!key.isEmpty() && key.size() == 32,
+          "generateKey produces 32 random bytes");
+
+    const QByteArray blob = CredCrypto::encrypt(key, QStringLiteral("svnuser123"));
+    check(!blob.isEmpty(), "encrypt produces a blob");
+    check(blob != QByteArray("svnuser123"), "blob differs from the plaintext");
+    check(!QString::fromLatin1(blob).contains(QStringLiteral("svnuser123")),
+          "blob does not contain the plaintext");
+
+    check(CredCrypto::decrypt(key, blob) == QStringLiteral("svnuser123"),
+          "decrypt round-trips the plaintext");
+    check(CredCrypto::decrypt(QByteArray(32, 'x'), blob).isEmpty(),
+          "decrypt with the wrong key fails");
+    check(CredCrypto::decrypt(key, QByteArray("garbage")).isEmpty(),
+          "decrypt with a corrupt blob fails");
+    check(CredCrypto::decrypt(key, blob.left(20)).isEmpty(),
+          "decrypt with a truncated blob fails");
+
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
+    ConfigStore::initialize();
+
+    Repository repo;
+    repo.name = QStringLiteral("crypto-repo");
+    repo.path = QStringLiteral("/tmp/crypto-repo");
+    repo.url = QStringLiteral("svn://localhost/crypto-repo");
+    repo.username = QStringLiteral("svnuser");
+    repo.password = QStringLiteral("s3cr3t-pass");
+    repo.state = RepoState::Background;
+    ConfigStore::saveRepositories({ repo });
+
+    const QList<Repository> loaded = ConfigStore::loadRepositories();
+    check(loaded.size() == 1
+              && loaded.first().password == QStringLiteral("s3cr3t-pass"),
+          "password round-trips through the store");
+
+    Repository other;
+    other.name = QStringLiteral("crypto-other");
+    other.path = QStringLiteral("/tmp/crypto-other");
+    other.url = QStringLiteral("svn://localhost/crypto-other");
+    other.username = QStringLiteral("svnuser");
+    other.state = RepoState::Background;
+    ConfigStore::saveRepositories({ other });
+    const QList<Repository> afterPurge = ConfigStore::loadRepositories();
+    check(afterPurge.size() == 1 && afterPurge.first().password.isEmpty(),
+          "removed repo's credential row is purged and not reloaded");
+
+    ConfigStore::setDatabaseFileForTest(QString());
+    return true;
+}
+
 static bool runLiveRepo(const QString &wc, const QString &url,
                         const QString &user, const QString &pass)
 {
@@ -644,6 +703,7 @@ int main(int argc, char *argv[])
     testRepoWatcher();
     testRepoManagerLimit();
     testLogStore();
+    testCredentialEncryption();
 
     // Optional live validation: synccoretest --live <wc> <url> [user] [pass]
     const QStringList args = QCoreApplication::arguments();
