@@ -107,6 +107,7 @@ EOF
 echo "libsvnplus 0 libsvnplus (>= $VERSION)" > "$BUILD/libsvnplus.shlibs"
 mkdir -p "$BUILD/debian"
 cat > "$BUILD/debian/control" <<EOF
+Source: svnsyncdrive
 Package: svnsyncdrive
 Version: $VERSION
 Architecture: $ARCH
