@@ -20,6 +20,11 @@ bool pathLooksLikeFile(const QString &path)
 bool isServerCommand(Command command)
 {
     switch (command) {
+    case Command::GetRevision:
+        // Nominally local, but for remote working copies (svn://, http(s)://)
+        // `svn info WC@working` still performs a server round-trip and fails
+        // with a network error when the repository is unreachable, so it must
+        // participate in disconnect detection too.
     case Command::GetHeadRevision:
     case Command::GetServerUpdatePaths:
     case Command::Update:
