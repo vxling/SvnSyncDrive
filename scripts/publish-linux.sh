@@ -4,10 +4,15 @@
 #   build/publish/svnsyncdrive-<version>-linux64.tar.gz   (self-contained bundle)
 #   build/publish/svnsyncdrive_<version>_amd64.deb        (Debian package)
 #
-# Run from the repository root after building:
-#   cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DLIBSVNPLUS_ROOT=/usr
+# Run from the repository root after building against the SVN stack to bundle
+# (point LIBSVNPLUS_ROOT at the libsvnplus stage that sits on top of that
+# stack, e.g. a custom-built Subversion prefix):
+#   cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release \
+#       -DLIBSVNPLUS_ROOT=/path/to/svn-prefix
 #   cmake --build build
 #   bash scripts/publish-linux.sh
+# The SVN stack shared libraries are bundled into both artifacts, so the app
+# always runs with the exact libsvn it was built against.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -80,16 +85,41 @@ echo "Created $TGZ ($(du -h "$TGZ" | cut -f1))"
 # --- deb package ---------------------------------------------------------------
 DEB="$BUILD/$DEB_NAME"
 rm -rf "$DEB"
+DEB_LIBDIR="usr/lib/svnsyncdrive"
 mkdir -p "$DEB/DEBIAN" \
+         "$DEB/$DEB_LIBDIR" \
+         "$DEB/$DEB_LIBDIR/lib" \
          "$DEB/usr/bin" \
          "$DEB/usr/share/applications" \
          "$DEB/usr/share/icons/hicolor/256x256/apps" \
          "$DEB/usr/share/doc/svnsyncdrive"
 
-cp "$BIN" "$DEB/usr/bin/svnsyncdrive"
+# Bundle the SVN stack this app was built against (e.g. a custom-built
+# Subversion 1.15) so the installed app never picks up a mismatched system
+# libsvn. Resolve the stack location from the binary's RUNPATH and ship the
+# libsvn_* / libserf* shared libraries in the app's private directory.
+SVN_LIB_DIR="$(readelf -d "$BIN" | sed -n 's/.*(RUNPATH).*\[\(.*\)\].*/\1/p' | head -1)"
+if [ -z "$SVN_LIB_DIR" ]; then
+    echo "Cannot locate bundled SVN lib dir (no RUNPATH on binary)" >&2
+    exit 1
+fi
+for f in "$SVN_LIB_DIR"/libsvn*.so* "$SVN_LIB_DIR"/libserf*.so*; do
+    [ -f "$f" ] && cp -L "$f" "$DEB/$DEB_LIBDIR/lib/"
+done
+
+cp "$BIN" "$DEB/$DEB_LIBDIR/svnsyncdrive"
 cp "$ROOT/src/resources/icon_256.png" "$DEB/usr/share/icons/hicolor/256x256/apps/svnsyncdrive.png"
 [ -f "$ROOT/LICENSE" ] && cp "$ROOT/LICENSE" "$DEB/usr/share/doc/svnsyncdrive/copyright"
 [ -f "$ROOT/README.md" ] && cp "$ROOT/README.md" "$DEB/usr/share/doc/svnsyncdrive/README.md"
+
+# Wrapper: point LD_LIBRARY_PATH at the bundled SVN libs so the app always
+# runs with the exact libsvn it was built against.
+cat > "$DEB/usr/bin/svnsyncdrive" <<EOF
+#!/bin/sh
+export LD_LIBRARY_PATH=/usr/lib/svnsyncdrive/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
+exec /usr/lib/svnsyncdrive/svnsyncdrive "\$@"
+EOF
+chmod +x "$DEB/usr/bin/svnsyncdrive"
 
 cat > "$DEB/usr/share/applications/svnsyncdrive.desktop" <<EOF
 [Desktop Entry]
@@ -103,8 +133,10 @@ Categories=Utility;Network;
 StartupNotify=true
 EOF
 
-# libsvnplus ships without a dpkg shlibs file, so provide one locally.
-echo "libsvnplus 0 libsvnplus (>= $VERSION)" > "$BUILD/libsvnplus.shlibs"
+# Compute Depends from the binary and the bundled SVN libs (so their
+# transitive system deps such as curl/ssl are captured). The bundled SVN
+# libraries themselves have no dpkg shlibs mapping, so they never appear in
+# Depends - which is correct, they ship inside the package.
 mkdir -p "$BUILD/debian"
 cat > "$BUILD/debian/control" <<EOF
 Source: svnsyncdrive
@@ -112,7 +144,11 @@ Package: svnsyncdrive
 Version: $VERSION
 Architecture: $ARCH
 EOF
-DEPS="$(cd "$BUILD" && dpkg-shlibdeps -O -l"$BUILD/libsvnplus.shlibs" "$BIN" 2>/dev/null \
+EXTRA_E=""
+for f in "$DEB/$DEB_LIBDIR/lib"/*.so*; do
+    EXTRA_E="$EXTRA_E -e$f"
+done
+DEPS="$(cd "$BUILD" && dpkg-shlibdeps -O --ignore-missing-info -e"$BIN" $EXTRA_E 2>/dev/null \
     | sed 's/^shlibs:Depends=//')"
 rm -f "$BUILD/debian/control"
 rmdir "$BUILD/debian" 2>/dev/null || true
