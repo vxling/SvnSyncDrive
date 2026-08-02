@@ -12,7 +12,7 @@ namespace {
 
 QString buildVersionLine()
 {
-    return QStringLiteral("SvnSyncDrive 0.2.0 · libsvnplus %1 · Qt %2")
+    return QStringLiteral("SvnSyncDrive 0.3.0 · libsvnplus %1 · Qt %2")
         .arg(QString::fromStdString(SvnPlus::SvnClient::version().toString()),
              QString::fromLatin1(qVersion()));
 }

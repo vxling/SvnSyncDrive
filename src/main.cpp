@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName("SvnSyncDrive");
     app.setOrganizationName("SvnSyncDrive");
-    app.setApplicationVersion("0.2.0");
+    app.setApplicationVersion("0.3.0");
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
 
     const QString key = instanceKey();

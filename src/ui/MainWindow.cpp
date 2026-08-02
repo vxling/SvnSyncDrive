@@ -53,7 +53,7 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addWidget(m_statusText, 1);
     auto *versionLabel = new QLabel(
         QStringLiteral("SvnSyncDrive %1 · libsvnplus %2 · Qt %3")
-            .arg(QStringLiteral("0.2.0"),
+            .arg(QStringLiteral("0.3.0"),
                  QString::fromStdString(SvnPlus::SvnClient::version().toString()),
                  QString::fromLatin1(qVersion())),
         this);
