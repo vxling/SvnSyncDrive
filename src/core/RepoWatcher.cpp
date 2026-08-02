@@ -6,10 +6,16 @@
 #include <windows.h>
 #endif
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 
+#include <chrono>
 #include <vector>
 
 namespace svnsync {
@@ -44,6 +50,18 @@ bool shouldIgnore(const QString &path)
 qint64 nowMs()
 {
     return QDateTime::currentMSecsSinceEpoch();
+}
+
+// Recursively add every directory under `root` to the watcher. Idempotent:
+// paths already watched are ignored, so this can be re-run to pick up
+// subdirectories created after a directory change.
+void addDirTree(QFileSystemWatcher &watcher, const QString &root)
+{
+    watcher.addPath(root);
+    QDirIterator it(root, QDir::Dirs | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext())
+        watcher.addPath(it.next());
 }
 
 } // namespace
@@ -184,7 +202,40 @@ void RepoWatcher::run()
         CloseHandle(hDir);
     }
 #else
-    Q_UNUSED(m_watchPath);
+    // Portable fallback (Linux / macOS): watch the directory tree with
+    // QFileSystemWatcher. QFileSystemWatcher does not recurse, so subdirectories
+    // are added up front and re-scanned whenever a directory changes.
+    const auto onFsEvent = [this](const QString &path) {
+        const QString normalized = QDir::fromNativeSeparators(path);
+        if (!shouldIgnore(normalized) && !m_suspended.load())
+            m_pending.insert(normalized);
+        collectAndMaybeEmit();
+    };
+
+    QFileSystemWatcher watcher;
+    addDirTree(watcher, m_watchPath);
+    QObject::connect(&watcher, &QFileSystemWatcher::directoryChanged,
+                     &watcher, [this, &watcher, onFsEvent](const QString &path) {
+                         addDirTree(watcher, path);
+                         onFsEvent(path);
+                     });
+    QObject::connect(&watcher, &QFileSystemWatcher::fileChanged,
+                     &watcher, [onFsEvent](const QString &path) {
+                         onFsEvent(path);
+                     });
+
+    QElapsedTimer throttle;
+    throttle.start();
+    while (!m_stopRequested.load()) {
+        // Drive the watcher's signals and flush pending changes on a cadence
+        // so the debounce guarantee holds even without filesystem activity.
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (throttle.elapsed() >= 500) {
+            collectAndMaybeEmit();
+            throttle.restart();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 #endif
 
     // Flush anything still pending on shutdown.

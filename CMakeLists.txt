@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS Widgets Network Sql)
+# Qt 6.5 is the lowest still-supported line; the Windows dev box ships newer,
+# the Ubuntu/macOS toolchains older. Nothing here needs 6.11 APIs.
+find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Network Sql)
 
 if(NOT DEFINED LIBSVNPLUS_ROOT)
     set(LIBSVNPLUS_ROOT "C:/Users/xuser/Documents/LibSVNPlus/build/_stage"
@@ -21,12 +23,21 @@ if(NOT SVNPLUS_INCLUDE_DIR OR NOT SVNPLUS_LIBRARY)
     message(FATAL_ERROR "libsvnplus not found under LIBSVNPLUS_ROOT=${LIBSVNPLUS_ROOT}")
 endif()
 
+# The libsvn stack the app links against. On Windows these resolve to the
+# import/static libraries staged with libsvnplus; on Linux/macOS find_library
+# falls back to the system shared libraries (libsvn_client-1.so, libapr-1.so,
+# ...). The "lib"-prefixed names are tried first to match the staged layout.
+find_library(SVN_CLIENT_LIBRARY NAMES libsvn_client-1 svn_client-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
+find_library(SVN_SUBR_LIBRARY NAMES libsvn_subr-1 svn_subr-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
+find_library(SVN_APR_LIBRARY NAMES libapr-1 apr-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
+find_library(SVN_APRUTIL_LIBRARY NAMES libaprutil-1 aprutil-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
+
 set(SVNPLUS_LIBS
     "${SVNPLUS_LIBRARY}"
-    "${LIBSVNPLUS_ROOT}/lib/libsvn_client-1.lib"
-    "${LIBSVNPLUS_ROOT}/lib/libsvn_subr-1.lib"
-    "${LIBSVNPLUS_ROOT}/lib/libapr-1.lib"
-    "${LIBSVNPLUS_ROOT}/lib/libaprutil-1.lib"
+    "${SVN_CLIENT_LIBRARY}"
+    "${SVN_SUBR_LIBRARY}"
+    "${SVN_APR_LIBRARY}"
+    "${SVN_APRUTIL_LIBRARY}"
 )
 
 # ── core library (no GUI dependency) ──────────────────────────────────────
@@ -54,10 +65,10 @@ add_library(svnsync_core STATIC
 )
 
 target_include_directories(svnsync_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_include_directories(svnsync_core PUBLIC
-    "${SVNPLUS_INCLUDE_DIR}"
-    "${LIBSVNPLUS_ROOT}/include/subversion-1"
-)
+target_include_directories(svnsync_core PUBLIC "${SVNPLUS_INCLUDE_DIR}")
+if(EXISTS "${LIBSVNPLUS_ROOT}/include/subversion-1")
+    target_include_directories(svnsync_core PUBLIC "${LIBSVNPLUS_ROOT}/include/subversion-1")
+endif()
 target_compile_definitions(svnsync_core PUBLIC SVNPLUS_STATIC)
 target_link_libraries(svnsync_core PUBLIC Qt6::Core Qt6::Sql PRIVATE ${SVNPLUS_LIBS})
 
@@ -101,9 +112,8 @@ function(deploy_qt TARGET)
 endfunction()
 
 # ── GUI application ───────────────────────────────────────────────────────
-add_executable(svnsyncdrive
+set(SVNSYNCDRIVE_SOURCES
     src/main.cpp
-    src/app.rc
     src/resources.qrc
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
@@ -122,6 +132,10 @@ add_executable(svnsyncdrive
     src/ui/SettingsDialog.cpp
     src/ui/SettingsDialog.h
 )
+if(WIN32)
+    list(APPEND SVNSYNCDRIVE_SOURCES src/app.rc)
+endif()
+add_executable(svnsyncdrive ${SVNSYNCDRIVE_SOURCES})
 
 target_link_libraries(svnsyncdrive PRIVATE
     svnsync_core
@@ -129,9 +143,12 @@ target_link_libraries(svnsyncdrive PRIVATE
     Qt6::Network
 )
 # GUI application: no console window (/subsystem:windows via WIN32_EXECUTABLE,
-# with Qt6::EntryPointPrivate providing the WinMain entry point).
+# with Qt6::EntryPointPrivate providing the WinMain entry point). On Linux and
+# macOS a plain main() is used, so the Windows-only entry point is skipped.
 set_target_properties(svnsyncdrive PROPERTIES WIN32_EXECUTABLE TRUE)
-target_link_libraries(svnsyncdrive PRIVATE Qt6::EntryPointPrivate)
+if(WIN32)
+    target_link_libraries(svnsyncdrive PRIVATE Qt6::EntryPointPrivate)
+endif()
 copy_libsvn_runtime_dlls(svnsyncdrive)
 deploy_qt(svnsyncdrive)
 
