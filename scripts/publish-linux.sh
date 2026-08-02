@@ -105,8 +105,16 @@ EOF
 
 # libsvnplus ships without a dpkg shlibs file, so provide one locally.
 echo "libsvnplus 0 libsvnplus (>= $VERSION)" > "$BUILD/libsvnplus.shlibs"
-DEPS="$(dpkg-shlibdeps -O -l"$BUILD/libsvnplus.shlibs" "$BIN" 2>/dev/null \
+mkdir -p "$BUILD/debian"
+cat > "$BUILD/debian/control" <<EOF
+Package: svnsyncdrive
+Version: $VERSION
+Architecture: $ARCH
+EOF
+DEPS="$(cd "$BUILD" && dpkg-shlibdeps -O -l"$BUILD/libsvnplus.shlibs" "$BIN" 2>/dev/null \
     | sed 's/^shlibs:Depends=//')"
+rm -f "$BUILD/debian/control"
+rmdir "$BUILD/debian" 2>/dev/null || true
 
 INSTALLED_SIZE="$(du -sk "$DEB/usr" | cut -f1)"
 cat > "$DEB/DEBIAN/control" <<EOF
