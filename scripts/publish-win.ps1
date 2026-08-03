@@ -1,21 +1,22 @@
 # Publishes the SvnSyncDrive Windows release: rebuilds the app, stages a clean
 # portable layout (exe + Qt/SVN/OpenSSL DLLs + plugins), then produces
 #   build\publish\SvnSyncDrive-<version>-win64.zip
-#   build\publish\SvnSyncDrive-<version>-win64-setup.exe   (Inno Setup)
+#   build\publish\SvnSyncDrive-<version>-win64.msi   (WiX per-user MSI)
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\publish-win.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\publish-win.ps1 -Version 0.2.0
 #
 # Requires: Visual Studio (any recent), CMake + Ninja, Qt 6 (see -QtRoot), and
-# Inno Setup 6 (ISCC.exe) for the installer. The staged libsvnplus install is
-# taken from LIBSVNPLUS_ROOT (default: ..\LibSVNPlus\build\_stage).
+# WiX 3.14 (candle.exe/light.exe/heat.exe, see -WixRoot). The staged libsvnplus
+# install is taken from LIBSVNPLUS_ROOT (default: ..\LibSVNPlus\build\_stage).
 
 [CmdletBinding()]
 param(
     [string]$Version = "0.2.0",
     [string]$QtRoot = "C:\Users\xuser\Qt\6.11.1\msvc2022_64",
     [string]$LibSvnPlusRoot = "C:\Users\xuser\Documents\LibSVNPlus\build\_stage",
+    [string]$WixRoot = "C:\Users\xuser\Tools\WiX314\tools",
     [switch]$SkipBuild
 )
 
@@ -33,11 +34,15 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "CMakeLists.txt"))) {
     throw "Could not locate SvnSyncDrive root from $scriptDir"
 }
 
-$iscc = "C:\Users\xuser\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
-if (-not (Test-Path -LiteralPath $iscc)) { throw "Inno Setup not found: $iscc" }
 if (-not (Test-Path -LiteralPath $QtRoot)) { throw "Qt root not found: $QtRoot" }
 if (-not (Test-Path -LiteralPath $LibSvnPlusRoot)) {
     throw "libsvnplus stage not found: $LibSvnPlusRoot (build LibSVNPlus first)"
+}
+$candle = Join-Path $WixRoot "candle.exe"
+$light = Join-Path $WixRoot "light.exe"
+$heat = Join-Path $WixRoot "heat.exe"
+foreach ($t in @($candle, $light, $heat)) {
+    if (-not (Test-Path -LiteralPath $t)) { throw "WiX tool not found: $t (install WiX 3.14 and pass -WixRoot)" }
 }
 
 # ── Visual Studio environment for cmake/ninja ───────────────────────────────
@@ -85,8 +90,23 @@ $zip = Join-Path $stageParent "SvnSyncDrive-$Version-win64.zip"
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
 Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
 
-# ── Inno installer ───────────────────────────────────────────────────────────
-$iss = Join-Path $scriptDir "svn_sync_drive.iss"
-Invoke-Shell $iscc @("/Qp", "/DSourceDir=$stage", "/DOutputDir=$stageParent", "/DVersion=$Version", $iss)
+# ── MSI installer (WiX, per-user) ─────────────────────────────────────────────
+$wixWork = Join-Path $buildDir "wix"
+if (Test-Path -LiteralPath $wixWork) { Remove-Item -Recurse -Force -LiteralPath $wixWork }
+New-Item -ItemType Directory -Force -Path $wixWork | Out-Null
+$componentsWxs = Join-Path $wixWork "components.wxs"
+Invoke-Shell $heat @("dir", $stage, "-out", $componentsWxs, "-cg", "MainComponentGroup",
+                     "-gg", "-scom", "-sreg", "-srd", "-sfrag", "-su", "-dr", "INSTALLDIR",
+                     "-var", "var.StageDir", "-sw5150")
+$mainWxs = Join-Path $scriptDir "svn_sync_drive.wxs"
+Invoke-Shell $candle @("-dStageDir=$stage", "-dVersion=$Version", "-ext", "WixUIExtension",
+                       $mainWxs, $componentsWxs, "-out", "$wixWork\")
+$msi = Join-Path $stageParent "SvnSyncDrive-$Version-win64.msi"
+if (Test-Path -LiteralPath $msi) { Remove-Item -LiteralPath $msi }
+Invoke-Shell $light @("-ext", "WixUIExtension", "-cultures:en-us",
+                      "-sice:ICE38", "-sice:ICE64",
+                      (Join-Path $wixWork "svn_sync_drive.wixobj"),
+                      (Join-Path $wixWork "components.wixobj"),
+                      "-o", $msi)
 
 Get-ChildItem -LiteralPath $stageParent | Select-Object Name, Length
