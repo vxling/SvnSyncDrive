@@ -24,6 +24,8 @@
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <atomic>
+#include <vector>
 
 using namespace svnsync;
 
@@ -105,6 +107,26 @@ struct WorkerAndFake
         if (worker)
             worker->stop();
     }
+};
+
+/** Runner whose per-command result is decided by a test-set handler. Used to
+ *  drive SyncEngine::classify through real resultReady/onResult plumbing
+ *  without touching a live SVN server. */
+class ScriptedRunner : public ICommandRunner
+{
+public:
+    std::function<CommandResult(const CommandItem &)> handler;
+
+    CommandResult execute(const CommandItem &item) override
+    {
+        if (handler)
+            return handler(item);
+        return makeResult(item, true);
+    }
+    void setCredentials(const QString &, const QString &) override {}
+    void setTrustServerCertificate(bool) override {}
+    void setNetworkTimeout(int) override {}
+    void cancel() override {}
 };
 
 /**
@@ -490,6 +512,360 @@ static bool testCredentialEncryption()
     return true;
 }
 
+static bool testSyncEngineTempFiles()
+{
+    std::printf("-- SyncEngine::isTempFile --\n");
+    check(SyncEngine::isTempFile(QStringLiteral("/a/~$lock.docx")), "office lock file ~$");
+    check(SyncEngine::isTempFile(QStringLiteral("/a/~backup.txt")), "editor backup ~");
+    check(SyncEngine::isTempFile(QStringLiteral("/a/notes.tmp")), ".tmp suffix");
+    check(SyncEngine::isTempFile(QStringLiteral("/a/notes.temp")), ".temp suffix");
+    check(SyncEngine::isTempFile(QStringLiteral("/a/.DS_Store")), ".DS_Store");
+    check(!SyncEngine::isTempFile(QStringLiteral("/a/report.pdf")), "regular file is not temp");
+    check(!SyncEngine::isTempFile(QStringLiteral("/a/foo.tmpx")), ".tmpx is not matched");
+    check(!SyncEngine::isTempFile(QStringLiteral("/a/bar")), "extensionless file is not temp");
+    return true;
+}
+
+static bool testSyncEngineGroupByDir()
+{
+    std::printf("-- SyncEngine::groupByDir --\n");
+    StatusEntry fileA;
+    fileA.path = QStringLiteral("/repo/src/a.cpp");
+    fileA.nodeStatus = StatusKind::Modified;
+    StatusEntry fileB;
+    fileB.path = QStringLiteral("/repo/src/sub/b.cpp");
+    fileB.nodeStatus = StatusKind::Modified;
+    StatusEntry dirChanged;
+    dirChanged.path = QStringLiteral("/repo/docs");
+    dirChanged.nodeStatus = StatusKind::Modified;
+
+    const auto groups =
+        SyncEngine::groupByDir({ fileA, fileB, dirChanged }, QStringLiteral("/repo"));
+
+    check(groups.size() == 3, "three groups: one per distinct directory");
+
+    // Deepest first: /repo/src/sub (3 slashes) precedes the two 2-slash
+    // directories; the order between those two is unspecified.
+    const QStringList dirs = [&groups] {
+        QStringList d;
+        for (const auto &g : groups)
+            d << g.dir;
+        return d;
+    }();
+    check(dirs.first() == QStringLiteral("/repo/src/sub"),
+          "deepest directory is committed first");
+
+    for (const auto &g : groups) {
+        if (g.dir == QStringLiteral("/repo/src/sub")) {
+            check(g.count == 1 && g.firstFile == QStringLiteral("b.cpp"),
+                  "sub dir group holds its file");
+        } else if (g.dir == QStringLiteral("/repo/src")) {
+            check(g.count == 1 && g.firstFile == QStringLiteral("a.cpp"),
+                  "src group holds its file");
+        } else if (g.dir == QStringLiteral("/repo/docs")) {
+            check(g.count == 1, "docs group holds the directory itself");
+        }
+    }
+
+    // A file directly in the repo root groups under the root.
+    StatusEntry rootFile;
+    rootFile.path = QStringLiteral("/repo/readme.md");
+    rootFile.nodeStatus = StatusKind::Modified;
+    const auto rootGroups =
+        SyncEngine::groupByDir({ rootFile }, QStringLiteral("/repo"));
+    check(rootGroups.size() == 1
+              && rootGroups.first().dir == QStringLiteral("/repo"),
+          "root file groups under the repository root");
+    return true;
+}
+
+static bool testSyncEngineCommitMessage()
+{
+    std::printf("-- SyncEngine::commitMessage --\n");
+    check(SyncEngine::commitMessage(QStringLiteral("/repo/src"),
+                                    1, QStringLiteral("a.cpp"))
+              == QStringLiteral("Auto-sync: a.cpp"),
+          "single file: named directly");
+    check(SyncEngine::commitMessage(QStringLiteral("/repo/src"),
+                                    3, QStringLiteral("a.cpp"))
+              == QStringLiteral("Auto-sync: 3 files in src"),
+          "multiple files: count + directory name");
+    check(SyncEngine::commitMessage(QStringLiteral("/repo"), 5, QStringLiteral("x"))
+              == QStringLiteral("Auto-sync: 5 files in repo"),
+          "root directory uses the repo name");
+    return true;
+}
+
+static bool testSyncEngineMergeToDirs()
+{
+    std::printf("-- SyncEngine::mergeToDirs --\n");
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    const QString root = QDir::cleanPath(dir.path());
+
+    // Existing subtree: /root/real/a.txt exists (dir real exists).
+    QDir(root).mkpath(QStringLiteral("real"));
+    const QString existing = root + QStringLiteral("/real");
+
+    // A path that exists on disk must keep its own directory.
+    const QString existingFile = existing + QStringLiteral("/a.txt");
+    writeFile(existingFile, "x");
+
+    // A path under a non-existent directory must walk up to the nearest
+    // existing ancestor (the WC root always exists).
+    const QString ghost = root + QStringLiteral("/gone/deep/b.txt");
+    const QString rootFile = root + QStringLiteral("/c.txt");
+
+    const QStringList merged =
+        SyncEngine::mergeToDirs({ existingFile, ghost, rootFile }, root);
+
+    // Deepest-first, unique directories.
+    const int existingIdx = merged.indexOf(existing);
+    const int rootIdx = merged.indexOf(root);
+    check(existingIdx >= 0 && rootIdx >= 0, "existing dir and root are both retained");
+    check(merged.size() == 2, "three paths merge into two unique directories");
+    check(existingIdx < rootIdx, "deeper directory is updated first");
+    return true;
+}
+
+static bool testSyncEngineResolveChoice()
+{
+    std::printf("-- SyncEngine::resolveConflictCode --\n");
+    const QString tree = QStringLiteral("/wc/dir-that-collides");
+    const QString text = QStringLiteral("/wc/file.txt");
+    const QStringList trees = { tree };
+
+    // Tree conflicts always resolve to "working" (Merged, code 5), whatever
+    // the user picked for the regular conflicts.
+    check(SyncEngine::resolveConflictCode(tree, trees, 2) == 5,
+          "tree conflict with user choice MineFull maps to Merged");
+    check(SyncEngine::resolveConflictCode(tree, trees, 1) == 5,
+          "tree conflict with user choice TheirsFull maps to Merged");
+    check(SyncEngine::resolveConflictCode(tree, trees, 0) == 5,
+          "tree conflict with user choice Base maps to Merged");
+    check(SyncEngine::resolveConflictCode(tree, trees, 5) == 5,
+          "tree conflict with user choice Merged stays Merged");
+
+    // Regular conflicts keep the user's choice.
+    check(SyncEngine::resolveConflictCode(text, trees, 2) == 2,
+          "text conflict keeps MineFull");
+    check(SyncEngine::resolveConflictCode(text, trees, 1) == 1,
+          "text conflict keeps TheirsFull");
+    check(SyncEngine::resolveConflictCode(text, trees, 0) == 0,
+          "text conflict keeps Base");
+    check(SyncEngine::resolveConflictCode(text, trees, 5) == 5,
+          "text conflict keeps Merged");
+
+    // Path not listed among the conflicts at all.
+    check(SyncEngine::resolveConflictCode(QStringLiteral("/wc/other.txt"), trees, 2) == 2,
+          "unlisted path keeps the user choice");
+    return true;
+}
+
+/** Build an engine wired to a ScriptedRunner and run start() so the full
+ *  resultReady -> onResult -> classify plumbing is exercised. The test
+ *  submits one GetHeadRevision per entry in headErrors; empty string means
+ *  success, anything else is the error text returned for that call. */
+static bool runClassifyScenario(
+    int disconnectThreshold, const std::vector<QString> &headErrors,
+    int expectedLost, int expectedAuth, int expectedRestored)
+{
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    Repository repo;
+    repo.name = QStringLiteral("classify");
+    repo.path = dir.path();
+    repo.url = QStringLiteral("svn://localhost/classify");
+    repo.state = RepoState::Active;
+
+    SyncEngine engine(repo);
+    auto *scripted = new ScriptedRunner;
+    engine.setCommandRunnerFactoryForTest(
+        [scripted]() -> std::unique_ptr<ICommandRunner> {
+            return std::unique_ptr<ICommandRunner>(scripted);
+        });
+
+    GlobalConfig cfg;
+    cfg.disconnectThreshold = disconnectThreshold;
+    cfg.pollIntervalMs = 60000;      // long enough to not fire during the test
+    cfg.fullSyncIntervalMs = 600000; // ditto
+    engine.setConfig(cfg);
+
+    // The scripted runner answers GetHeadRevision from the test's error list
+    // (indexed by a thread-safe counter), everything else succeeds.
+    std::atomic<int> headCalls{ 0 };
+    scripted->handler = [&headCalls, &headErrors](const CommandItem &item) {
+        if (item.command != Command::GetHeadRevision)
+            return makeResult(item, true);
+        const int i = headCalls.fetch_add(1);
+        if (i < int(headErrors.size()) && !headErrors[i].isEmpty())
+            return makeResult(item, false, headErrors[i]);
+        return makeResult(item, true);
+    };
+
+    int lost = 0;
+    int auth = 0;
+    int restored = 0;
+    QObject context;
+    QObject::connect(&engine, &SyncEngine::connectionLost, &context,
+                     [&lost]() { ++lost; });
+    QObject::connect(&engine, &SyncEngine::authenticationFailed, &context,
+                     [&auth]() { ++auth; });
+    QObject::connect(&engine, &SyncEngine::connectionRestored, &context,
+                     [&restored]() { ++restored; });
+
+    engine.start();
+    // The engine's startup fullSync already submits an Update; let it settle
+    // before we feed server-command results into classify().
+    QThread::msleep(300);
+
+    // Feed one GetHeadRevision per expected result. onResult runs the
+    // callback and then classify() in the same slot, so after the callback
+    // fires (and the queued event returns) the health signals are current.
+    for (size_t i = 0; i < headErrors.size(); ++i) {
+        CommandItem item;
+        item.command = Command::GetHeadRevision;
+        item.path = repo.path;
+        item.repoUrl = repo.url;
+        bool done = false;
+        engine.submit(item, [&done](const CommandResult &) { done = true; });
+        check(waitUntil([&] { return done; }), "classify scenario command completed");
+    }
+
+    // Give any remaining queued signals time to be delivered before stop.
+    QThread::msleep(50);
+    engine.stop();
+
+    check(lost == expectedLost, "connectionLost emitted exactly the expected times");
+    check(auth == expectedAuth, "authenticationFailed emitted exactly the expected times");
+    check(restored == expectedRestored, "connectionRestored emitted exactly the expected times");
+    return lost == expectedLost && auth == expectedAuth && restored == expectedRestored;
+}
+
+static bool testSyncEngineClassify()
+{
+    std::printf("-- SyncEngine server-health classification --\n");
+
+    // A single network failure below the threshold emits nothing.
+    check(runClassifyScenario(
+              3, { QStringLiteral("Connection timed out") }, 0, 0, 0),
+          "single network failure below threshold emits nothing");
+
+    // Reaching the threshold emits connectionLost.
+    check(runClassifyScenario(
+              2,
+              { QStringLiteral("Unable to connect to host"),
+                QStringLiteral("Unable to connect to host") },
+              1, 0, 0),
+          "threshold of consecutive network failures emits connectionLost");
+
+    // An authentication error emits authenticationFailed and is not counted
+    // as a network failure (no connectionLost even at threshold 1).
+    check(runClassifyScenario(
+              1,
+              { QStringLiteral("No more credentials or we tried too many times. "
+                               "Authentication failed") },
+              0, 1, 0),
+          "authentication failure emits authenticationFailed, not connectionLost");
+
+    // Success after connectionLost restores the connection.
+    check(runClassifyScenario(
+              1,
+              { QStringLiteral("Connection timed out"), QString() },
+              1, 0, 1),
+          "successful server command after disconnect emits connectionRestored");
+
+    // A local working-copy error (not network/auth) must not count towards
+    // disconnect detection.
+    check(runClassifyScenario(
+              1, { QStringLiteral("None of the targets are working copies") },
+              0, 0, 0),
+          "local working-copy error does not count as a network failure");
+
+    return true;
+}
+
+static bool testWorkerWatchdog()
+{
+    std::printf("-- SvnWorker watchdog --\n");
+    WorkerAndFake wf;
+
+    // Block the runner until cancel() is called; a watchdog-margined command
+    // must not hang the worker forever.
+    std::atomic<bool> started{ false };
+    wf.fake->handler = [&started, &wf](const CommandItem &item) {
+        started.store(true);
+        while (!wf.fake->cancelled)
+            QThread::msleep(10);
+        return makeResult(item, true);
+    };
+
+    wf.worker->setCommandTimeoutSec(1);
+    wf.worker->submit(makeItem(Command::Status, QStringLiteral("/wc")));
+
+    check(waitUntil([&] { return started.load(); }), "command started on the worker");
+    check(waitUntil([&] { return wf.fake->cancelled; }, 5000),
+          "watchdog cancelled the stuck command after the timeout");
+
+    wf.worker->stop();
+    return true;
+}
+
+static bool testGlobalConfigRoundtrip()
+{
+    std::printf("-- ConfigStore global config round-trip --\n");
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
+
+    // Defaults when nothing is stored yet.
+    const GlobalConfig defaults = ConfigStore::loadGlobalConfig();
+    check(defaults.pollIntervalMs == 60 * 1000, "default poll interval");
+    check(defaults.fullSyncIntervalMs == 15 * 60 * 1000, "default full-sync interval");
+    check(defaults.autoAddUnversioned, "default auto-add");
+    check(defaults.minimizeToTray, "default minimize to tray");
+    check(defaults.maxLogsPerRepo == 10000, "default max logs per repo");
+    check(defaults.disconnectThreshold == 3, "default disconnect threshold");
+    check(defaults.networkTimeoutSec == 60, "default network timeout");
+
+    // Custom values survive a save + load (and a re-open of the file).
+    GlobalConfig custom;
+    custom.pollIntervalMs = 5 * 1000;
+    custom.fullSyncIntervalMs = 2 * 60 * 1000;
+    custom.autoAddUnversioned = false;
+    custom.trustServerCertificate = false;
+    custom.minimizeToTray = false;
+    custom.startMinimizedToTray = true;
+    custom.maxLogsPerRepo = 500;
+    custom.disconnectThreshold = 7;
+    custom.networkTimeoutSec = 120;
+    ConfigStore::saveGlobalConfig(custom);
+
+    GlobalConfig loaded = ConfigStore::loadGlobalConfig();
+    check(loaded.pollIntervalMs == 5000, "poll interval round-trips");
+    check(loaded.fullSyncIntervalMs == 120000, "full-sync interval round-trips");
+    check(!loaded.autoAddUnversioned, "auto-add round-trips");
+    check(!loaded.trustServerCertificate, "trust-cert round-trips");
+    check(!loaded.minimizeToTray, "minimize-to-tray round-trips");
+    check(loaded.startMinimizedToTray, "start-minimized round-trips");
+    check(loaded.maxLogsPerRepo == 500, "max logs round-trips");
+    check(loaded.disconnectThreshold == 7, "disconnect threshold round-trips");
+    check(loaded.networkTimeoutSec == 120, "network timeout round-trips");
+
+    // A reload from a fresh connection (app restart) sees the same values.
+    ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
+    loaded = ConfigStore::loadGlobalConfig();
+    check(loaded.pollIntervalMs == 5000 && loaded.disconnectThreshold == 7
+              && loaded.networkTimeoutSec == 120,
+          "values survive a restart (re-opened database)");
+
+    ConfigStore::setDatabaseFileForTest(QString());
+    return true;
+}
+
 static bool runLiveRepo(const QString &wc, const QString &url,
                         const QString &user, const QString &pass)
 {
@@ -514,7 +890,7 @@ static bool runLiveRepo(const QString &wc, const QString &url,
     QObject::connect(&engine, &SyncEngine::syncNotification, &engine,
                      [&notifications](const QString &m) { notifications.append(m); });
     QObject::connect(&engine, &SyncEngine::conflictDetected, &engine,
-                     [&conflicts](const QStringList &c) { conflicts = c; });
+                     [&conflicts](const QStringList &c, const QStringList &) { conflicts = c; });
     QObject::connect(&engine, &SyncEngine::filesChanged, &engine,
                      [&fileChangeCount]() { ++fileChangeCount; });
 
@@ -730,6 +1106,15 @@ int main(int argc, char *argv[])
     testRepoManagerLimit();
     testLogStore();
     testCredentialEncryption();
+
+    testSyncEngineTempFiles();
+    testSyncEngineGroupByDir();
+    testSyncEngineCommitMessage();
+    testSyncEngineMergeToDirs();
+    testSyncEngineResolveChoice();
+    testSyncEngineClassify();
+    testWorkerWatchdog();
+    testGlobalConfigRoundtrip();
 
     // Optional live validation: synccoretest --live <wc> <url> [user] [pass]
     const QStringList args = QCoreApplication::arguments();

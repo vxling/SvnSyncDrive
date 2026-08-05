@@ -288,14 +288,19 @@ void MainWindow::logToRepo(const QString &name, const QString &message)
         page->appendLog(message);
 }
 
-void MainWindow::onConflictDetected(const QString &name, const QStringList &paths)
+void MainWindow::onConflictDetected(const QString &name, const QStringList &paths,
+                                    const QStringList &treeConflictPaths)
 {
     logToRepo(name, QStringLiteral("[冲突] %1 个文件：%2")
               .arg(paths.size()).arg(paths.join(QStringLiteral(", "))));
+    if (!treeConflictPaths.isEmpty())
+        logToRepo(name, QStringLiteral("[冲突] 其中 %1 个为树冲突（将按保留当前状态处理）：%2")
+                  .arg(treeConflictPaths.size())
+                  .arg(treeConflictPaths.join(QStringLiteral(", "))));
     svnsync::SyncEngine *engine = m_manager->engine(name);
     if (!engine)
         return;
-    ConflictDialog dlg(engine, paths, this);
+    ConflictDialog dlg(engine, paths, treeConflictPaths, this);
     dlg.exec();
     if (RepoDetailPage *page = pageFor(name))
         page->refreshFiles();
@@ -316,13 +321,16 @@ void MainWindow::scanConflicts(const QString &name)
     item.path = repo->path;
     engine->submit(item, [this, name](const svnsync::CommandResult &r) {
         QStringList paths;
+        QStringList treePaths;
         if (r.success && !r.value.isEmpty()) {
             const QStringList parts = r.value.split(QLatin1Char(';'), Qt::SkipEmptyParts);
             for (const QString &p : parts)
                 paths.append(QString::fromUtf8(p.toUtf8()));
         }
+        if (r.success)
+            treePaths = r.treeConflicts;
         if (!paths.isEmpty()) {
-            onConflictDetected(name, paths);
+            onConflictDetected(name, paths, treePaths);
         } else {
             logToRepo(name, QStringLiteral("没有发现冲突文件。"));
         }

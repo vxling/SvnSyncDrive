@@ -4,6 +4,7 @@
 #include "core/SyncEngine.h"
 
 #include <QComboBox>
+#include <QColor>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -12,10 +13,12 @@
 
 ConflictDialog::ConflictDialog(svnsync::SyncEngine *engine,
                                const QStringList &conflicts,
+                               const QStringList &treeConflicts,
                                QWidget *parent)
     : QDialog(parent)
     , m_engine(engine)
     , m_conflicts(conflicts)
+    , m_treeConflicts(treeConflicts)
 {
     setWindowTitle(QStringLiteral("解决冲突"));
     setMinimumSize(540, 380);
@@ -25,8 +28,15 @@ ConflictDialog::ConflictDialog(svnsync::SyncEngine *engine,
     layout->addWidget(new QLabel(QStringLiteral("以下文件存在冲突，请选择处理方式："), this));
 
     m_list = new QListWidget(this);
-    for (const QString &path : m_conflicts)
-        m_list->addItem(path);
+    for (const QString &path : m_conflicts) {
+        const bool tree = m_treeConflicts.contains(path);
+        auto *item = new QListWidgetItem(tree
+                                             ? QStringLiteral("%1（树冲突）").arg(path)
+                                             : path,
+                                         m_list);
+        if (tree)
+            item->setForeground(QColor(0xc0, 0x30, 0x00));
+    }
     m_list->setSelectionMode(QAbstractItemView::NoSelection);
     layout->addWidget(m_list, 1);
 
@@ -39,6 +49,17 @@ ConflictDialog::ConflictDialog(svnsync::SyncEngine *engine,
     m_choice->addItem(QStringLiteral("使用基线版本（Base）"));
     choiceRow->addWidget(m_choice, 1);
     layout->addLayout(choiceRow);
+
+    if (!m_treeConflicts.isEmpty()) {
+        auto *hint = new QLabel(this);
+        hint->setWordWrap(true);
+        hint->setText(QStringLiteral(
+            "树冲突是目录增删改等结构性冲突，SVN 不支持对它们选择版本，将一律按"
+            "「保留当前工作副本状态」标记解决（图中以红色标注）。"));
+        layout->addWidget(hint);
+        if (m_treeConflicts.size() == m_conflicts.size())
+            m_choice->setEnabled(false);
+    }
 
     m_status = new QLabel(this);
     m_status->setWordWrap(true);
@@ -78,10 +99,15 @@ void ConflictDialog::resolveAll()
     m_status->setText(QStringLiteral("正在解决冲突…"));
 
     for (const QString &path : m_conflicts) {
+        // Tree conflicts only accept the "working" state via the legacy
+        // svn_client_resolve API; resolveConflictCode maps them to Merged
+        // no matter what the user picked for the regular conflicts.
+        const int code = svnsync::SyncEngine::resolveConflictCode(path, m_treeConflicts,
+                                                                  choiceCode);
         svnsync::CommandItem item;
         item.command = svnsync::Command::Resolve;
         item.path = path;
-        item.conflictChoice = choiceCode;
+        item.conflictChoice = code;
         m_engine->submit(item, [this](const svnsync::CommandResult &r) {
             --m_resolving;
             if (r.success)

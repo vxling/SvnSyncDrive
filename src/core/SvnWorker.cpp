@@ -143,6 +143,7 @@ private:
             e.textStatus = toStatusKind(s.textStatus);
             e.versioned = s.versioned;
             e.conflicted = s.conflicted;
+            e.treeConflicted = s.treeConflicted;
             e.outOfDate = s.outOfDate;
             e.revision = s.revision;
             if (s.reposNodeStatus != SvnPlus::SvnStatusKind::None)
@@ -210,6 +211,9 @@ private:
         for (const auto &e : result.statuses)
             if (e.conflicted)
                 paths << e.path;
+        for (const auto &e : result.statuses)
+            if (e.treeConflicted)
+                result.treeConflicts << e.path;
         result.value = paths.join(QLatin1Char(';'));
     }
 

@@ -122,7 +122,7 @@ void SyncEngine::start()
         return;
     m_started = true;
 
-    m_worker->start();
+    m_worker->start(m_runnerFactory);
     m_worker->setCredentials(m_repo.username, m_repo.password);
     m_worker->setTrustServerCertificate(m_config.trustServerCertificate);
     m_worker->setNetworkTimeout(m_config.networkTimeoutSec);
@@ -626,13 +626,17 @@ void SyncEngine::detectConflicts(const std::function<void()> &done)
     statusItem.path = m_repo.path;
     submit(statusItem, [this, done](const CommandResult &r) {
         QStringList conflicted;
+        QStringList treeConflicts;
         if (r.success) {
             for (const auto &e : r.statuses)
                 if (e.conflicted)
                     conflicted << e.path;
+            for (const auto &e : r.statuses)
+                if (e.treeConflicted)
+                    treeConflicts << e.path;
         }
         if (!conflicted.isEmpty())
-            emit conflictDetected(conflicted);
+            emit conflictDetected(conflicted, treeConflicts);
         if (done)
             done();
     });
@@ -665,6 +669,16 @@ QStringList SyncEngine::mergeToDirs(const QStringList &paths, const QString &rep
         return a.count(QLatin1Char('/')) > b.count(QLatin1Char('/'));
     });
     return result;
+}
+
+int SyncEngine::resolveConflictCode(const QString &path, const QStringList &treeConflicts,
+                                    int userChoiceCode)
+{
+    // Tree conflicts can only be resolved to the "working" state through the
+    // legacy svn_client_resolve API; any other choice makes libsvn_wc fail
+    // with "Tree conflict can only be resolved to 'working' state". Code 5
+    // (Merged) is the "keep the current working copy state" choice.
+    return treeConflicts.contains(path) ? 5 : userChoiceCode;
 }
 
 void SyncEngine::notify(const QString &message)

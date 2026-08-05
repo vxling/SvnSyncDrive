@@ -18,6 +18,11 @@ class SyncEngine;
  * with one choice (mine / theirs / merged / base) through the repo's own
  * SvnWorker queue. It is modal but the resolve commands run asynchronously
  * on the worker thread; the dialog closes itself once all have succeeded.
+ *
+ * Tree conflicts are handled specially: the old svn_client_resolve API only
+ * accepts "working" (merged) for them, so those paths are always resolved as
+ * "keep the current working copy state" regardless of the selected choice and
+ * are flagged in the list so the user knows.
  */
 class ConflictDialog : public QDialog
 {
@@ -26,6 +31,7 @@ class ConflictDialog : public QDialog
 public:
     explicit ConflictDialog(svnsync::SyncEngine *engine,
                             const QStringList &conflicts,
+                            const QStringList &treeConflicts,
                             QWidget *parent = nullptr);
 
 private:
@@ -34,6 +40,7 @@ private:
 
     svnsync::SyncEngine *m_engine = nullptr;
     QStringList m_conflicts;
+    QStringList m_treeConflicts;
     QStringList m_failures;
     int m_resolving = 0;
     int m_succeeded = 0;

@@ -3,6 +3,7 @@
 #include "core/GlobalConfig.h"
 #include "core/Repository.h"
 #include "core/SvnCommand.h"
+#include "core/SvnWorker.h"
 
 #include <QHash>
 #include <QObject>
@@ -16,7 +17,6 @@
 
 namespace svnsync {
 
-class SvnWorker;
 class RepoWatcher;
 
 /**
@@ -65,10 +65,58 @@ public:
      *  Status) are executed with priority and never block other repos. */
     quint64 submit(const CommandItem &item, Callback callback = Callback());
 
+    /** Test hook: replace the worker's command runner factory before
+     *  start(). Pass a factory returning a fake ICommandRunner to drive the
+     *  engine without touching a real SVN server. Must be called before
+     *  start(); afterwards the default libsvnplus runner is used. */
+    void setCommandRunnerFactoryForTest(SvnWorker::RunnerFactory factory)
+    {
+        m_runnerFactory = std::move(factory);
+    }
+
+    struct CommitGroup
+    {
+        QString dir;
+        int count = 0;
+        QString firstFile;
+    };
+
+    // ── Pure helpers (public static so the console tests can cover them
+    //    without a running engine) ────────────────────────────────────────
+
+    /** Temp-file detection for the upward scan: office lock files (~$*),
+     *  editor backups (~*), *.tmp / *.temp and .DS_Store are never added or
+     *  committed. */
+    static bool isTempFile(const QString &path);
+
+    /** Group working-copy changes by the directory to commit: a file takes
+     *  its parent directory, a directory its own path. Result is ordered
+     *  deepest-first so child directories are committed before their parents. */
+    static QList<CommitGroup> groupByDir(const QList<StatusEntry> &changes,
+                                         const QString &repoRoot);
+
+    /** Auto-sync commit message: single file -> its name, multiple files ->
+     *  "N files in <dir>". */
+    static QString commitMessage(const QString &dir, int count, const QString &firstFile);
+
+    /** Reduce remote update paths to the deepest existing ancestor directory
+     *  of each entry (files take their parent, directories themselves), so
+     *  `svn update` never runs against a target that does not exist locally
+     *  (E155007). Returns unique directories, deepest-first. */
+    static QStringList mergeToDirs(const QStringList &paths, const QString &repoRoot);
+
+    /** Effective resolve choice for a conflicted path. Tree conflicts can only
+     *  be resolved to the "working" state via the legacy svn_client_resolve
+     *  API (any other choice makes libsvn_wc fail), so a path in
+     *  treeConflicts always maps to code 5 (Merged) no matter what the user
+     *  picked; other paths keep userChoiceCode unchanged. */
+    static int resolveConflictCode(const QString &path, const QStringList &treeConflicts,
+                                   int userChoiceCode);
+
 signals:
     void syncNotification(const QString &message);
     void filesChanged();
-    void conflictDetected(const QStringList &conflictedPaths);
+    void conflictDetected(const QStringList &conflictedPaths, const QStringList &treeConflictPaths);
 
     // Server-health classification of remote command results (see classify()).
     void authenticationFailed();   // auth error -> engine will be stopped
@@ -94,7 +142,6 @@ private:
     void onCommitCompleted();
     void maybeFinishScan();
     void finishScan();
-    static bool isTempFile(const QString &path);
 
     // Downward sync.
     void poll();
@@ -104,24 +151,13 @@ private:
                          const QStringList &remotePaths, int updatedCount);
     void detectConflicts(const std::function<void()> &done);
 
-    static QStringList mergeToDirs(const QStringList &paths, const QString &repoRoot);
-
-    struct CommitGroup
-    {
-        QString dir;
-        int count = 0;
-        QString firstFile;
-    };
-    static QList<CommitGroup> groupByDir(const QList<StatusEntry> &changes,
-                                         const QString &repoRoot);
-    static QString commitMessage(const QString &dir, int count, const QString &firstFile);
-
     void notify(const QString &message);
 
     Repository m_repo;
     GlobalConfig m_config;
     std::unique_ptr<SvnWorker> m_worker;
     std::unique_ptr<RepoWatcher> m_watcher;
+    SvnWorker::RunnerFactory m_runnerFactory;
 
     QTimer m_pollTimer;
     QTimer m_fullSyncTimer;

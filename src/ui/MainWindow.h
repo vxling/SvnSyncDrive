@@ -48,7 +48,8 @@ private:
     void closeEvent(QCloseEvent *event) override;
     void showNotification(const QString &name, const QString &message);
     void logToRepo(const QString &name, const QString &message);
-    void onConflictDetected(const QString &name, const QStringList &paths);
+    void onConflictDetected(const QString &name, const QStringList &paths,
+                            const QStringList &treeConflictPaths);
     void scanConflicts(const QString &name);
     RepoDetailPage *pageFor(const QString &name);
     void setGlobalStatus(const QString &text);

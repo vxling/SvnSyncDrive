@@ -88,7 +88,7 @@ public:
     void repositoryStateChanged(const QString &name, RepoState state);
     void notification(const QString &name, const QString &message);
     void filesChanged(const QString &name);
-    void conflictDetected(const QString &name, const QStringList &paths);
+    void conflictDetected(const QString &name, const QStringList &paths, const QStringList &treeConflictPaths);
 
 private:
     int indexOf(const QString &name) const;

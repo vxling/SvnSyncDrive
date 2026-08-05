@@ -7,13 +7,13 @@
 
 ## 1. 项目概述
 
-桌面 SVN 双向自动同步工具（Windows，Qt Widgets）：
+桌面 SVN 双向自动同步工具（Windows / Linux / macOS，Qt Widgets）：
 
 - **上行同步（本地 → 服务器）**：监听工作副本文件变化，自动 `svn add` 未版本化文件、按目录分组自动 `commit` 已版本化变更。
 - **下行同步（服务器 → 本地）**：定时查服务器 HEAD 与本地版本比较，若有差异则 `GetServerUpdatePaths`（本质 `svn status -u`）得到远端变更路径，按父目录合并后**分块 `svn update`**；不自动解决冲突，只上报。
 - 全局配置、仓库配置、同步日志均持久化到本地 SQLite / 日志文件。
 
-应用名 `SvnSyncDrive`，版本 0.2.0。
+应用名 `SvnSyncDrive`，版本 0.3.0。
 
 ---
 
@@ -22,11 +22,11 @@
 | 项 | 值 |
 |---|---|
 | 语言/标准 | C++17 |
-| GUI | Qt 6.11.1（`msvc2022_64`），组件 `Widgets Network Sql` |
-| 构建 | CMake 3.24+ / Ninja / MSVC 14.51（VS 18 Community） |
-| SVN | 自研封装库 **LibSVNPlus**（静态链接 `svnplus.lib`），内部链接 subversion 1.15.0-rc3（`libsvn_client-1` 等） |
+| GUI | Qt 6.5+（组件 `Widgets Network Sql`；Windows 开发机为 6.11.1 msvc2022_64） |
+| 构建 | CMake 3.24+ / Ninja；Windows MSVC，Linux GCC/Clang，macOS Clang |
+| SVN | 自研封装库 **LibSVNPlus**（静态链接 `svnplus.lib`），内部链接 subversion 1.15（`libsvn_client-1` 等） |
 | 存储 | SQLite（`QSQLITE` 驱动） |
-| 平台 | Windows（`ReadDirectoryChangesW`） |
+| 平台 | Windows / Linux / macOS（文件监听：Windows 单句柄 `ReadDirectoryChangesW`，其他平台 `QFileSystemWatcher` + 目录树快照 diff） |
 
 ### 构建（Windows）
 
@@ -390,20 +390,23 @@ poll()（60s 定时器；m_polling 防重入）
 
 ---
 
-## 13. 当前进行中事项（本次会话待收尾）
+## 13. 已知边界与待办
 
-已完成（已实现并通过 3 次 `live-sync-test.ps1` 回归，含深层目录用例）：
-1. **下行分块更新**：`Command::GetServerUpdatePaths`、`mergeToDirs`（含存在性上溯）、`startUpdateInChunks` 已恢复；`poll()` = head 比较 → GetServerUpdatePaths → 分块 update。
-2. **fullSync 双动作**：整仓库 `svn update`（不再分块）→ 上行全量扫描，串行执行。
-3. **LibSVNPlus status HEAD 修复已落库**：改动在 `LibSVNPlus/src/SvnClient.cpp`，已重建并 install 到 `_stage`（`svnplus.lib` 已更新）。
-4. **review 死锁修复**：`CommandItem::bypassDedup` + fullSync Update 置位，杜绝与用户根目录更新撞 key 导致的 `m_fullSyncing` 卡死；新增 `testWorkerDedupBypass` 回归（见决策 #11）。文件浏览的 `svn status`（ReadOnly 优先 + 异步回调）已确认无阻塞。
+### 已实现特性（0.3.0）
 
-可选清理（未做，待用户确认）：
-- `--probestatus` 探针代码；
-- config.db 里遗留的 `repo1/repo2`（旧 svnsynctest 测试仓库）。
+- **下行分块更新**：`Command::GetServerUpdatePaths`、`mergeToDirs`（含存在性上溯）、`startUpdateInChunks`；`poll()` = head 比较 → GetServerUpdatePaths → 分块 update。
+- **fullSync 双动作**：整仓库 `svn update`（不再分块）→ 上行全量扫描，串行执行。
+- **LibSVNPlus status HEAD 修复已落库**：改动在 `LibSVNPlus/src/SvnClient.cpp`，已重建并 install 到 `_stage`（`svnplus.lib` 已更新）。
+- **dedup 死锁修复**：`CommandItem::bypassDedup` + fullSync Update 置位，杜绝与用户根目录更新撞 key 导致的 `m_fullSyncing` 卡死；新增 `testWorkerDedupBypass` 回归（见决策 #11）。文件浏览的 `svn status`（ReadOnly 优先 + 异步回调）已确认无阻塞。
+- **网络韧性**：每命令网络超时（`networkTimeoutSec`）+ worker watchdog（`setCommandTimeoutSec`）+ 断网判定阈值（`disconnectThreshold`）。
 
 ### 已知边界
 
 - `syncNow` 只上行不下行（用户已确认此语义）。
 - `GetLastChangedTime` 是桩实现（冲突对话框的服务器时间可能不可用）。
 - `BreakLock` 不支持（直接失败）。
+
+### 可选清理（未做）
+
+- `--probestatus` 探针代码；
+- config.db 里遗留的 `repo1/repo2`（旧 svnsynctest 测试仓库）。

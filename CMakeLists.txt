@@ -28,6 +28,7 @@ endif()
 # falls back to the system shared libraries (libsvn_client-1.so, libapr-1.so,
 # ...). The "lib"-prefixed names are tried first to match the staged layout.
 find_library(SVN_CLIENT_LIBRARY NAMES libsvn_client-1 svn_client-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
+find_library(SVN_WC_LIBRARY NAMES libsvn_wc-1 svn_wc-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
 find_library(SVN_SUBR_LIBRARY NAMES libsvn_subr-1 svn_subr-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
 find_library(SVN_APR_LIBRARY NAMES libapr-1 apr-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
 find_library(SVN_APRUTIL_LIBRARY NAMES libaprutil-1 aprutil-1 HINTS "${LIBSVNPLUS_ROOT}/lib")
@@ -36,6 +37,7 @@ set(SVNPLUS_LIBS
     "${SVNPLUS_LIBRARY}"
     "${SVN_CLIENT_LIBRARY}"
     "${SVN_SUBR_LIBRARY}"
+    "${SVN_WC_LIBRARY}"
     "${SVN_APR_LIBRARY}"
     "${SVN_APRUTIL_LIBRARY}"
 )

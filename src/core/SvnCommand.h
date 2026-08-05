@@ -86,6 +86,7 @@ struct StatusEntry {
     StatusKind reposStatus = StatusKind::None;
     bool versioned = false;
     bool conflicted = false;
+    bool treeConflicted = false;
     bool outOfDate = false;
     qlonglong revision = -1;
 };
@@ -128,6 +129,7 @@ struct CommandResult
     QString value;              // generic string payload
     QList<StatusEntry> statuses;
     QList<InfoEntry> infos;
+    QStringList treeConflicts;  // conflicted paths that are tree conflicts (GetConflictedFiles)
 };
 
 CommandResult makeResult(const CommandItem &item, bool success, const QString &error = QString());
