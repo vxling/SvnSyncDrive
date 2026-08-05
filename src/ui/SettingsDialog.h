@@ -5,6 +5,7 @@
 #include <QDialog>
 
 class QCheckBox;
+class QComboBox;
 class QSpinBox;
 
 /**
@@ -31,4 +32,6 @@ private:
     QSpinBox *m_maxLogsPerRepo = nullptr;
     QSpinBox *m_disconnectThreshold = nullptr;
     QSpinBox *m_networkTimeoutSeconds = nullptr;
+    QCheckBox *m_autoResolve = nullptr;
+    QComboBox *m_conflictResolution = nullptr;
 };

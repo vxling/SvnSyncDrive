@@ -1,66 +1,99 @@
 #include "ui/SettingsDialog.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QVBoxLayout>
 
 SettingsDialog::SettingsDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(QStringLiteral("设置"));
-    setMinimumWidth(420);
+    setMinimumWidth(460);
 
     auto *layout = new QVBoxLayout(this);
 
-    auto *form = new QFormLayout;
-    m_pollSeconds = new QSpinBox(this);
+    auto *tabs = new QTabWidget(this);
+
+    auto *trayPage = new QWidget(tabs);
+    auto *trayForm = new QFormLayout(trayPage);
+    m_minimizeToTray = new QCheckBox(QStringLiteral("关闭窗口时最小化到系统托盘"), trayPage);
+    m_minimizeToTray->setToolTip(QStringLiteral("开启后常驻后台同步，可随时从托盘恢复窗口"));
+    m_startMinimizedToTray = new QCheckBox(QStringLiteral("启动时最小化到系统托盘（不显示窗口）"), trayPage);
+    m_startMinimizedToTray->setToolTip(QStringLiteral("开启后启动程序不显示主窗口，直接常驻系统托盘"));
+    trayForm->addRow(QStringLiteral("关闭窗口时最小化"), m_minimizeToTray);
+    trayForm->addRow(QStringLiteral("启动时隐藏到托盘"), m_startMinimizedToTray);
+    tabs->addTab(trayPage, QStringLiteral("系统托盘"));
+
+    auto *syncPage = new QWidget(tabs);
+    auto *syncForm = new QFormLayout(syncPage);
+    m_pollSeconds = new QSpinBox(syncPage);
     m_pollSeconds->setRange(10, 24 * 3600);
     m_pollSeconds->setSuffix(QStringLiteral(" 秒"));
     m_pollSeconds->setToolTip(QStringLiteral("多久检查一次服务器是否有新版本"));
-    m_fullSyncMinutes = new QSpinBox(this);
+    m_fullSyncMinutes = new QSpinBox(syncPage);
     m_fullSyncMinutes->setRange(1, 24 * 60);
     m_fullSyncMinutes->setSuffix(QStringLiteral(" 分钟"));
     m_fullSyncMinutes->setToolTip(QStringLiteral("周期性地把本地所有更改提交到服务器"));
+    m_autoAdd = new QCheckBox(QStringLiteral("自动添加未纳入版本控制的新文件"), syncPage);
+    m_autoAdd->setToolTip(QStringLiteral("关闭后只提交已有版本控制的修改"));
+    syncForm->addRow(QStringLiteral("向下同步检查周期"), m_pollSeconds);
+    syncForm->addRow(QStringLiteral("全量提交周期"), m_fullSyncMinutes);
+    syncForm->addRow(QStringLiteral("自动添加新文件"), m_autoAdd);
+    m_pollSeconds->setEnabled(false);
+    m_fullSyncMinutes->setEnabled(false);
+    m_autoAdd->setEnabled(false);
+    tabs->addTab(syncPage, QStringLiteral("同步"));
 
-    form->addRow(QStringLiteral("向下同步检查周期"), m_pollSeconds);
-    form->addRow(QStringLiteral("全量提交周期"), m_fullSyncMinutes);
+    auto *networkPage = new QWidget(tabs);
+    auto *networkForm = new QFormLayout(networkPage);
+    m_trustCert = new QCheckBox(QStringLiteral("信任自签名 / 未知证书"), networkPage);
+    m_disconnectThreshold = new QSpinBox(networkPage);
+    m_disconnectThreshold->setRange(1, 100);
+    m_disconnectThreshold->setSuffix(QStringLiteral(" 次"));
+    m_disconnectThreshold->setToolTip(QStringLiteral("连续多少次网络访问失败后，将仓库标记为“连接断开”。任意一次成功访问都会清零重新计数"));
+    m_networkTimeoutSeconds = new QSpinBox(networkPage);
+    m_networkTimeoutSeconds->setRange(5, 600);
+    m_networkTimeoutSeconds->setSuffix(QStringLiteral(" 秒"));
+    m_networkTimeoutSeconds->setToolTip(QStringLiteral("单次网络操作（如 HTTPS 握手）最多阻塞的秒数；超过后按网络错误处理并继续重试，避免卡住同步"));
+    networkForm->addRow(QStringLiteral("信任自签名证书"), m_trustCert);
+    networkForm->addRow(QStringLiteral("断网判定阈值"), m_disconnectThreshold);
+    networkForm->addRow(QStringLiteral("网络超时"), m_networkTimeoutSeconds);
+    tabs->addTab(networkPage, QStringLiteral("网络"));
 
-    m_maxLogsPerRepo = new QSpinBox(this);
+    auto *conflictPage = new QWidget(tabs);
+    auto *conflictForm = new QFormLayout(conflictPage);
+    m_autoResolve = new QCheckBox(QStringLiteral("自动解决冲突（不再弹窗提示）"), conflictPage);
+    m_autoResolve->setToolTip(QStringLiteral("发现冲突后自动按下方默认方式解决，不再弹出确认对话框；树冲突一律按“保留当前工作副本状态”处理"));
+    m_conflictResolution = new QComboBox(conflictPage);
+    m_conflictResolution->addItem(QStringLiteral("使用我的版本（MineFull）"));
+    m_conflictResolution->addItem(QStringLiteral("使用他们的版本（TheirsFull）"));
+    m_conflictResolution->addItem(QStringLiteral("标记为已合并（Merged）"));
+    m_conflictResolution->addItem(QStringLiteral("使用基线版本（Base）"));
+    m_conflictResolution->setToolTip(QStringLiteral("自动解决冲突时对文本冲突使用的默认处理方式（树冲突不适用，一律保留当前工作副本状态）"));
+    conflictForm->addRow(QStringLiteral("自动解决冲突"), m_autoResolve);
+    conflictForm->addRow(QStringLiteral("默认处理方式"), m_conflictResolution);
+    m_conflictResolution->setEnabled(false);
+    connect(m_autoResolve, &QCheckBox::toggled,
+            m_conflictResolution, &QWidget::setEnabled);
+    tabs->addTab(conflictPage, QStringLiteral("冲突处理"));
+
+    auto *logPage = new QWidget(tabs);
+    auto *logForm = new QFormLayout(logPage);
+    m_maxLogsPerRepo = new QSpinBox(logPage);
     m_maxLogsPerRepo->setRange(100, 10000);
     m_maxLogsPerRepo->setSingleStep(100);
     m_maxLogsPerRepo->setSuffix(QStringLiteral(" 条"));
     m_maxLogsPerRepo->setToolTip(QStringLiteral("每个仓库在本地数据库中最多保留的日志条数（上限 10000 条），超出后自动丢弃最早的"));
-    form->addRow(QStringLiteral("每个仓库保留日志条数"), m_maxLogsPerRepo);
+    logForm->addRow(QStringLiteral("每个仓库保留日志条数"), m_maxLogsPerRepo);
+    tabs->addTab(logPage, QStringLiteral("日志"));
 
-    m_disconnectThreshold = new QSpinBox(this);
-    m_disconnectThreshold->setRange(1, 100);
-    m_disconnectThreshold->setSuffix(QStringLiteral(" 次"));
-    m_disconnectThreshold->setToolTip(QStringLiteral("连续多少次网络访问失败后，将仓库标记为“连接断开”。任意一次成功访问都会清零重新计数"));
-    form->addRow(QStringLiteral("断网判定阈值"), m_disconnectThreshold);
-
-    m_networkTimeoutSeconds = new QSpinBox(this);
-    m_networkTimeoutSeconds->setRange(5, 600);
-    m_networkTimeoutSeconds->setSuffix(QStringLiteral(" 秒"));
-    m_networkTimeoutSeconds->setToolTip(QStringLiteral("单次网络操作（如 HTTPS 握手）最多阻塞的秒数；超过后按网络错误处理并继续重试，避免卡住同步"));
-    form->addRow(QStringLiteral("网络超时"), m_networkTimeoutSeconds);
-
-    m_autoAdd = new QCheckBox(QStringLiteral("自动添加未纳入版本控制的新文件"), this);
-    m_autoAdd->setToolTip(QStringLiteral("关闭后只提交已有版本控制的修改"));
-    m_trustCert = new QCheckBox(QStringLiteral("信任自签名 / 未知证书"), this);
-    m_minimizeToTray = new QCheckBox(QStringLiteral("关闭窗口时最小化到系统托盘"), this);
-    m_minimizeToTray->setToolTip(QStringLiteral("开启后常驻后台同步，可随时从托盘恢复窗口"));
-    m_startMinimizedToTray = new QCheckBox(QStringLiteral("启动时最小化到系统托盘（不显示窗口）"), this);
-    m_startMinimizedToTray->setToolTip(QStringLiteral("开启后启动程序不显示主窗口，直接常驻系统托盘"));
-
-    layout->addLayout(form);
-    layout->addWidget(m_autoAdd);
-    layout->addWidget(m_trustCert);
-    layout->addWidget(m_minimizeToTray);
-    layout->addWidget(m_startMinimizedToTray);
+    layout->addWidget(tabs);
 
     auto *hint = new QLabel(
         QStringLiteral("更改将应用到所有正在同步的仓库。"), this);
@@ -87,6 +120,14 @@ void SettingsDialog::setConfig(const svnsync::GlobalConfig &config)
     m_maxLogsPerRepo->setValue(config.maxLogsPerRepo);
     m_disconnectThreshold->setValue(config.disconnectThreshold);
     m_networkTimeoutSeconds->setValue(config.networkTimeoutSec);
+    m_autoResolve->setChecked(config.autoResolveConflicts);
+    switch (config.conflictResolution) {
+    case 0: m_conflictResolution->setCurrentIndex(3); break; // Base
+    case 1: m_conflictResolution->setCurrentIndex(1); break; // TheirsFull
+    case 2: m_conflictResolution->setCurrentIndex(0); break; // MineFull
+    default: m_conflictResolution->setCurrentIndex(2); break; // Merged
+    }
+    m_conflictResolution->setEnabled(config.autoResolveConflicts);
 }
 
 svnsync::GlobalConfig SettingsDialog::config() const
@@ -101,5 +142,12 @@ svnsync::GlobalConfig SettingsDialog::config() const
     config.maxLogsPerRepo = m_maxLogsPerRepo->value();
     config.disconnectThreshold = m_disconnectThreshold->value();
     config.networkTimeoutSec = m_networkTimeoutSeconds->value();
+    config.autoResolveConflicts = m_autoResolve->isChecked();
+    switch (m_conflictResolution->currentIndex()) {
+    case 0: config.conflictResolution = 2; break; // MineFull
+    case 1: config.conflictResolution = 1; break; // TheirsFull
+    case 3: config.conflictResolution = 0; break; // Base
+    default: config.conflictResolution = 5; break; // Merged
+    }
     return config;
 }
