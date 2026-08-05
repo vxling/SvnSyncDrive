@@ -635,10 +635,50 @@ void SyncEngine::detectConflicts(const std::function<void()> &done)
                 if (e.treeConflicted)
                     treeConflicts << e.path;
         }
-        if (!conflicted.isEmpty())
-            emit conflictDetected(conflicted, treeConflicts);
+        if (!conflicted.isEmpty()) {
+            if (m_config.autoResolveConflicts)
+                resolveConflicts(conflicted, treeConflicts);
+            else
+                emit conflictDetected(conflicted, treeConflicts);
+        }
         if (done)
             done();
+    });
+}
+
+void SyncEngine::resolveConflicts(const QStringList &conflicts,
+                                  const QStringList &treeConflicts)
+{
+    if (conflicts.isEmpty())
+        return;
+
+    for (const QString &path : conflicts) {
+        const int code = resolveConflictCode(path, treeConflicts,
+                                             m_config.conflictResolution);
+        resolvePath(path, code, treeConflicts.contains(path),
+                    [this, path](const CommandResult &r) {
+                        if (r.success)
+                            notify(tr("已自动解决冲突: %1").arg(path));
+                        else
+                            notify(tr("自动解决冲突失败: %1（%2）").arg(path).arg(r.error));
+                    });
+    }
+
+    notify(tr("已按默认方式自动解决 %1 个冲突（树冲突一律保留当前工作副本状态）")
+               .arg(conflicts.size()));
+}
+
+quint64 SyncEngine::resolvePath(const QString &path, int choiceCode, bool treeConflict,
+                                Callback callback)
+{
+    CommandItem item;
+    item.command = Command::Resolve;
+    item.path = path;
+    item.conflictChoice = choiceCode;
+    return submit(item, [this, path, choiceCode, treeConflict, callback](const CommandResult &r) {
+        emit conflictResolved(path, choiceCode, treeConflict, r.success, r.error);
+        if (callback)
+            callback(r);
     });
 }
 
@@ -679,6 +719,19 @@ int SyncEngine::resolveConflictCode(const QString &path, const QStringList &tree
     // with "Tree conflict can only be resolved to 'working' state". Code 5
     // (Merged) is the "keep the current working copy state" choice.
     return treeConflicts.contains(path) ? 5 : userChoiceCode;
+}
+
+QString SyncEngine::conflictChoiceName(int code)
+{
+    switch (code) {
+    case 0: return QStringLiteral("使用基线版本");
+    case 1: return QStringLiteral("使用他们的版本");
+    case 2: return QStringLiteral("使用我的版本");
+    case 3: return QStringLiteral("使用他们的版本（冲突标记）");
+    case 4: return QStringLiteral("使用我的版本（冲突标记）");
+    case 5: return QStringLiteral("标记为已合并");
+    default: return QStringLiteral("未知（%1）").arg(code);
+    }
 }
 
 void SyncEngine::notify(const QString &message)

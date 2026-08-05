@@ -89,6 +89,8 @@ public:
     void notification(const QString &name, const QString &message);
     void filesChanged(const QString &name);
     void conflictDetected(const QString &name, const QStringList &paths, const QStringList &treeConflictPaths);
+    void conflictResolved(const QString &name, const QString &path, int choiceCode,
+                          bool treeConflict, bool success, const QString &error);
 
 private:
     int indexOf(const QString &name) const;

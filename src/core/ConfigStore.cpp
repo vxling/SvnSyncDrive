@@ -328,6 +328,10 @@ GlobalConfig ConfigStore::loadGlobalConfig()
             config.disconnectThreshold = value.toInt();
         else if (key == QStringLiteral("networkTimeoutSec"))
             config.networkTimeoutSec = value.toInt();
+        else if (key == QStringLiteral("autoResolveConflicts"))
+            config.autoResolveConflicts = value.toInt() != 0;
+        else if (key == QStringLiteral("conflictResolution"))
+            config.conflictResolution = value.toInt();
     }
     return config;
 }
@@ -365,6 +369,8 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         put(QStringLiteral("maxLogsPerRepo"), QString::number(config.maxLogsPerRepo));
         put(QStringLiteral("disconnectThreshold"), QString::number(config.disconnectThreshold));
         put(QStringLiteral("networkTimeoutSec"), QString::number(config.networkTimeoutSec));
+        put(QStringLiteral("autoResolveConflicts"), QString::number(config.autoResolveConflicts));
+        put(QStringLiteral("conflictResolution"), QString::number(config.conflictResolution));
     }
 
     if (ok)

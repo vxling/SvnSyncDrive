@@ -275,6 +275,11 @@ void RepoManager::startEngine(const QString &name)
             [this, repoName](const QStringList &p, const QStringList &tp) {
                 emit conflictDetected(repoName, p, tp);
             });
+    connect(engine.get(), &SyncEngine::conflictResolved, this,
+            [this, repoName](const QString &path, int code, bool tree,
+                             bool success, const QString &error) {
+                emit conflictResolved(repoName, path, code, tree, success, error);
+            });
     connect(engine.get(), &SyncEngine::authenticationFailed, this,
             [this, repoName]() { markAuthFailed(repoName); });
     connect(engine.get(), &SyncEngine::connectionLost, this,

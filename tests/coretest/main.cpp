@@ -660,6 +660,120 @@ static bool testSyncEngineResolveChoice()
     // Path not listed among the conflicts at all.
     check(SyncEngine::resolveConflictCode(QStringLiteral("/wc/other.txt"), trees, 2) == 2,
           "unlisted path keeps the user choice");
+
+    // Log labels for the choice codes used in conflictResolved log lines.
+    check(SyncEngine::conflictChoiceName(0) == QStringLiteral("使用基线版本"),
+          "choice 0 label is Base");
+    check(SyncEngine::conflictChoiceName(1) == QStringLiteral("使用他们的版本"),
+          "choice 1 label is TheirsFull");
+    check(SyncEngine::conflictChoiceName(2) == QStringLiteral("使用我的版本"),
+          "choice 2 label is MineFull");
+    check(SyncEngine::conflictChoiceName(5) == QStringLiteral("标记为已合并"),
+          "choice 5 label is Merged");
+    check(SyncEngine::conflictChoiceName(99).startsWith(QStringLiteral("未知")),
+          "unknown code has a fallback label");
+    return true;
+}
+
+/** With autoResolveConflicts enabled, detectConflicts resolves every conflicted
+ *  file through the configured default choice (tree conflicts forced to
+ *  Merged=5) and must NOT emit conflictDetected. With it disabled the dialog
+ *  path is used instead: conflictDetected fires and no Resolve is submitted. */
+static bool runAutoResolveScenario(bool autoResolve)
+{
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    Repository repo;
+    repo.name = QStringLiteral("autoresolve");
+    repo.path = dir.path();
+    repo.url = QStringLiteral("svn://localhost/autoresolve");
+    repo.state = RepoState::Active;
+
+    SyncEngine engine(repo);
+    auto *scripted = new ScriptedRunner;
+    engine.setCommandRunnerFactoryForTest(
+        [scripted]() -> std::unique_ptr<ICommandRunner> {
+            return std::unique_ptr<ICommandRunner>(scripted);
+        });
+
+    GlobalConfig cfg;
+    cfg.autoResolveConflicts = autoResolve;
+    cfg.conflictResolution = 1;      // TheirsFull for text conflicts
+    cfg.pollIntervalMs = 60000;      // long enough to not fire during the test
+    cfg.fullSyncIntervalMs = 600000; // ditto
+    engine.setConfig(cfg);
+
+    const QString textPath = dir.path() + QStringLiteral("/file.txt");
+    const QString treePath = dir.path() + QStringLiteral("/colliding-dir");
+
+    int dialogFired = 0;
+    std::atomic<int> resolveCalls{ 0 };
+    std::atomic<int> resolvedSignals{ 0 };
+    std::atomic<int> codeText{ -1 };
+    std::atomic<int> codeTree{ -1 };
+    QObject context;
+    QObject::connect(&engine, &SyncEngine::conflictDetected, &context,
+                     [&dialogFired](const QStringList &, const QStringList &) { ++dialogFired; });
+    QObject::connect(&engine, &SyncEngine::conflictResolved, &context,
+                     [&resolvedSignals](const QString &, int, bool, bool, const QString &) {
+                         ++resolvedSignals;
+                     });
+
+    scripted->handler = [&](const CommandItem &item) {
+        CommandResult r = makeResult(item, true);
+        if (item.command == Command::Status) {
+            StatusEntry text;
+            text.path = textPath;
+            text.conflicted = true;
+            StatusEntry tree;
+            tree.path = treePath;
+            tree.conflicted = true;
+            tree.treeConflicted = true;
+            r.statuses = { text, tree };
+        }
+        if (item.command == Command::Resolve) {
+            resolveCalls.fetch_add(1);
+            if (item.path == textPath)
+                codeText.store(item.conflictChoice);
+            else
+                codeTree.store(item.conflictChoice);
+        }
+        return r;
+    };
+
+    engine.start();
+
+    const bool sawResolves = waitUntil([&] { return resolveCalls.load() >= 2; }, 10000);
+    const bool sawResolved = waitUntil([&] { return resolvedSignals.load() >= 2; }, 10000);
+    // Let any queued conflictDetected signal (that must NOT arrive when
+    // auto-resolving) settle before asserting on it.
+    QThread::msleep(50);
+    engine.stop();
+
+    if (autoResolve) {
+        check(sawResolves, "auto-resolve submits one Resolve per conflict");
+        check(resolveCalls.load() == 2, "exactly two Resolve commands for two conflicts");
+        check(sawResolved, "conflictResolved fires once per auto-resolved conflict");
+        check(resolvedSignals.load() == 2, "two conflictResolved signals for two conflicts");
+        check(codeText.load() == 1, "text conflict uses the configured default choice");
+        check(codeTree.load() == 5, "tree conflict is forced to Merged (working state)");
+        check(dialogFired == 0, "conflict dialog is suppressed when auto-resolve is on");
+        return sawResolves && resolveCalls.load() == 2 && sawResolved
+            && resolvedSignals.load() == 2 && codeText.load() == 1 && codeTree.load() == 5
+            && dialogFired == 0;
+    }
+
+    check(!sawResolves, "no Resolve commands when auto-resolve is off");
+    check(dialogFired >= 1, "conflict dialog fires when auto-resolve is off");
+    return !sawResolves && dialogFired >= 1;
+}
+
+static bool testSyncEngineAutoResolve()
+{
+    std::printf("-- SyncEngine auto-resolve --\n");
+    check(runAutoResolveScenario(true), "auto-resolve scenario");
+    check(runAutoResolveScenario(false), "manual (dialog) scenario");
     return true;
 }
 
@@ -830,6 +944,8 @@ static bool testGlobalConfigRoundtrip()
     check(defaults.maxLogsPerRepo == 10000, "default max logs per repo");
     check(defaults.disconnectThreshold == 3, "default disconnect threshold");
     check(defaults.networkTimeoutSec == 60, "default network timeout");
+    check(!defaults.autoResolveConflicts, "default auto-resolve off");
+    check(defaults.conflictResolution == 2, "default conflict resolution is MineFull");
 
     // Custom values survive a save + load (and a re-open of the file).
     GlobalConfig custom;
@@ -842,6 +958,8 @@ static bool testGlobalConfigRoundtrip()
     custom.maxLogsPerRepo = 500;
     custom.disconnectThreshold = 7;
     custom.networkTimeoutSec = 120;
+    custom.autoResolveConflicts = true;
+    custom.conflictResolution = 1;
     ConfigStore::saveGlobalConfig(custom);
 
     GlobalConfig loaded = ConfigStore::loadGlobalConfig();
@@ -854,6 +972,8 @@ static bool testGlobalConfigRoundtrip()
     check(loaded.maxLogsPerRepo == 500, "max logs round-trips");
     check(loaded.disconnectThreshold == 7, "disconnect threshold round-trips");
     check(loaded.networkTimeoutSec == 120, "network timeout round-trips");
+    check(loaded.autoResolveConflicts, "auto-resolve round-trips");
+    check(loaded.conflictResolution == 1, "conflict resolution round-trips");
 
     // A reload from a fresh connection (app restart) sees the same values.
     ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
@@ -1112,6 +1232,7 @@ int main(int argc, char *argv[])
     testSyncEngineCommitMessage();
     testSyncEngineMergeToDirs();
     testSyncEngineResolveChoice();
+    testSyncEngineAutoResolve();
     testSyncEngineClassify();
     testWorkerWatchdog();
     testGlobalConfigRoundtrip();

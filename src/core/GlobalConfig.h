@@ -43,6 +43,16 @@ struct GlobalConfig
      *  a stuck connection therefore gives up after roughly this long instead
      *  of blocking the worker for libsvn's default 600 seconds. */
     int networkTimeoutSec = 60;
+
+    /** Resolve conflicts automatically with conflictResolution instead of
+     *  showing the conflict dialog. Tree conflicts are always resolved to
+     *  the "working" state (code 5) regardless of this setting. */
+    bool autoResolveConflicts = false;
+
+    /** Default resolve choice used when autoResolveConflicts is enabled:
+     *  0=Base 1=TheirsFull 2=MineFull 3=TheirsConflict 4=MineConflict
+     *  5=Merged (same codes as CommandItem::conflictChoice). */
+    int conflictResolution = 2;   // MineFull
 };
 
 } // namespace svnsync

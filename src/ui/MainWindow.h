@@ -50,6 +50,8 @@ private:
     void logToRepo(const QString &name, const QString &message);
     void onConflictDetected(const QString &name, const QStringList &paths,
                             const QStringList &treeConflictPaths);
+    void onConflictResolved(const QString &name, const QString &path, int choiceCode,
+                            bool treeConflict, bool success, const QString &error);
     void scanConflicts(const QString &name);
     RepoDetailPage *pageFor(const QString &name);
     void setGlobalStatus(const QString &text);

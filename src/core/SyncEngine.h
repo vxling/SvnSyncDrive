@@ -31,7 +31,10 @@ class RepoWatcher;
  * paths (via GetServerUpdatePaths) are merged into parent directories and
  * updated deepest-first. The 15-min full sync instead updates the whole
  * working copy in one pass, then runs a full upward scan. Conflicts are
- * reported but never auto-resolved.
+ * reported through the conflictDetected signal, or — when
+ * autoResolveConflicts is enabled — resolved automatically with the
+ * configured default choice (tree conflicts always keep the working copy
+ * state).
  *
  * The engine lives on the GUI thread; all SVN calls happen on the
  * SvnWorker thread, and results are marshalled back through queued
@@ -64,6 +67,13 @@ public:
      *  the GUI thread when the result is ready. ReadOnly commands (e.g.
      *  Status) are executed with priority and never block other repos. */
     quint64 submit(const CommandItem &item, Callback callback = Callback());
+
+    /** Resolve one conflicted path. Submits the Resolve command and emits
+     *  conflictResolved with the outcome (so both manual and automatic
+     *  resolutions end up in the log); the optional callback runs right
+     *  after the signal, before control returns to the event loop. */
+    quint64 resolvePath(const QString &path, int choiceCode, bool treeConflict,
+                        Callback callback = Callback());
 
     /** Test hook: replace the worker's command runner factory before
      *  start(). Pass a factory returning a fake ICommandRunner to drive the
@@ -113,10 +123,20 @@ public:
     static int resolveConflictCode(const QString &path, const QStringList &treeConflicts,
                                    int userChoiceCode);
 
+    /** Human-readable label for a conflict-choice code, e.g. for log lines. */
+    static QString conflictChoiceName(int code);
+
 signals:
     void syncNotification(const QString &message);
     void filesChanged();
     void conflictDetected(const QStringList &conflictedPaths, const QStringList &treeConflictPaths);
+
+    /** Emitted after one conflicted path has been resolved (or failed to),
+     *  whether resolved manually through the dialog or automatically by
+     *  autoResolveConflicts. choiceCode is the *effective* code used: tree
+     *  conflicts always carry 5 and treeConflict is true for them. */
+    void conflictResolved(const QString &path, int choiceCode, bool treeConflict,
+                          bool success, const QString &error);
 
     // Server-health classification of remote command results (see classify()).
     void authenticationFailed();   // auth error -> engine will be stopped
@@ -150,6 +170,7 @@ private:
     void afterUpdateDone(qlonglong serverRev, qlonglong localRev,
                          const QStringList &remotePaths, int updatedCount);
     void detectConflicts(const std::function<void()> &done);
+    void resolveConflicts(const QStringList &conflicts, const QStringList &treeConflicts);
 
     void notify(const QString &message);
 

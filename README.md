@@ -9,7 +9,7 @@ Built with C++17 + Qt 6 (Widgets), on top of [LibSVNPlus](https://github.com/vxl
 - **Upward sync (local → server)**: watches the working copy, auto-runs `svn add` on unversioned files and commits versioned changes (grouped by directory, deepest first).
 - **Downward sync (server → local)**: polls the server HEAD, discovers remote changes via `svn status -u`, and updates the working copy in chunks (deepest directory first).
 - **Full sync on a timer**: periodic whole-tree `svn update` + full upward scan as a safety net for edge cases.
-- **Conflict handling**: conflicts are detected and surfaced in a dialog; never auto-resolved.
+- **Conflict handling**: conflicts are detected and surfaced in a dialog by default; optionally auto-resolved with a configurable default choice (tree conflicts always keep the working copy state).
 - **Per-repository engine**: every repo gets its own watcher, worker thread, and timers — one slow repo never blocks another.
 - **Resilient networking**: per-command network timeouts with a worker watchdog, and a configurable disconnect threshold that flags dead servers quickly.
 - **System tray integration**: run minimized to the tray so background sync keeps going.
@@ -96,7 +96,7 @@ Everything is kept under `~/.svnsyncdrive`:
 | `logs.db` | SQLite: per-repository sync history |
 | `svnsyncdrive.log` | Program log (rotating) |
 
-Settings (all changeable in **设置** / Settings): poll interval, full-sync interval, auto-add unversioned files, trust self-signed certificates, minimize to tray, logs kept per repo, disconnect threshold, and network timeout.
+Settings (all changeable in **设置** / Settings): poll interval, full-sync interval, auto-add unversioned files, trust self-signed certificates, minimize to tray, logs kept per repo, disconnect threshold, network timeout, and auto-resolve conflicts with a default resolution choice.
 
 ## Building from source
 

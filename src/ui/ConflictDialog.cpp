@@ -104,19 +104,16 @@ void ConflictDialog::resolveAll()
         // no matter what the user picked for the regular conflicts.
         const int code = svnsync::SyncEngine::resolveConflictCode(path, m_treeConflicts,
                                                                   choiceCode);
-        svnsync::CommandItem item;
-        item.command = svnsync::Command::Resolve;
-        item.path = path;
-        item.conflictChoice = code;
-        m_engine->submit(item, [this](const svnsync::CommandResult &r) {
-            --m_resolving;
-            if (r.success)
-                ++m_succeeded;
-            else
-                m_failures.append(r.error);
-            if (m_resolving <= 0)
-                finishIfDone();
-        });
+        m_engine->resolvePath(path, code, m_treeConflicts.contains(path),
+                              [this](const svnsync::CommandResult &r) {
+                                  --m_resolving;
+                                  if (r.success)
+                                      ++m_succeeded;
+                                  else
+                                      m_failures.append(r.error);
+                                  if (m_resolving <= 0)
+                                      finishIfDone();
+                              });
     }
 }
 

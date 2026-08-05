@@ -90,6 +90,8 @@ MainWindow::MainWindow(QWidget *parent)
             });
     connect(m_manager.get(), &svnsync::RepoManager::conflictDetected,
             this, &MainWindow::onConflictDetected);
+    connect(m_manager.get(), &svnsync::RepoManager::conflictResolved,
+            this, &MainWindow::onConflictResolved);
 
     m_manager->load();
     rebuildSidebar();
@@ -304,6 +306,20 @@ void MainWindow::onConflictDetected(const QString &name, const QStringList &path
     dlg.exec();
     if (RepoDetailPage *page = pageFor(name))
         page->refreshFiles();
+}
+
+void MainWindow::onConflictResolved(const QString &name, const QString &path,
+                                    int choiceCode, bool treeConflict,
+                                    bool success, const QString &error)
+{
+    const QString choice = treeConflict
+        ? QStringLiteral("保留当前工作副本状态")
+        : svnsync::SyncEngine::conflictChoiceName(choiceCode);
+    if (success)
+        logToRepo(name, QStringLiteral("[冲突] 已解决：%1（%2）").arg(path, choice));
+    else
+        logToRepo(name, QStringLiteral("[冲突] 解决失败：%1（%2）：%3")
+                      .arg(path, choice, error));
 }
 
 void MainWindow::scanConflicts(const QString &name)
