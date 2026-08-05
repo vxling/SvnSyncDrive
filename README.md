@@ -56,6 +56,17 @@ cd svnsyncdrive-<version>-linux64
 
 Open the `.dmg` and drag the app to *Applications*. The app is only ad-hoc signed (no Apple Developer ID), so on first launch right-click it in Finder and choose **Open** to bypass Gatekeeper.
 
+## File status icons in the OS file manager
+
+SvnSyncDrive shows SVN status icons inside its own file browser, but it does **not** add status overlays to the OS file manager (Explorer / Finder / Nautilus). Shell icon overlays are platform-specific, tightly coupled to each OS, and hard-limited by the OS (Windows exposes only 15 overlay slots system-wide; Nautilus removed its emblem API on modern GNOME; Finder badges require a separately-signed Swift extension). Building and maintaining that per platform is not worth it for a desktop client.
+
+On **Windows**, install [TortoiseSVN](https://tortoisesvn.net/) to get SVN status overlays directly in Explorer — it reads the same `svn` working copies and requires no extra configuration:
+
+1. Install TortoiseSVN (use "Show overlay icons" from its settings if overlays are hidden — overlay slots are shared with Dropbox/OneDrive/other tools).
+2. Its Explorer overlays and column providers work on any SVN working copy, including ones managed by SvnSyncDrive.
+
+On **macOS** and **Linux**, Explorer-style overlays are not practically available; rely on the status icons inside SvnSyncDrive's file browser instead.
+
 ## Quick start
 
 1. Launch SvnSyncDrive.
