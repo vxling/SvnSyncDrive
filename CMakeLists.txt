@@ -153,6 +153,20 @@ if(WIN32)
 endif()
 add_executable(svnsyncdrive ${SVNSYNCDRIVE_SOURCES})
 
+# ── build stamp (version + build time) ────────────────────────────────────
+# Regenerated before every build. The UI reads SVNSYNC_VERSION and
+# SVNSYNC_BUILD_TIMESTAMP from ${CMAKE_CURRENT_BINARY_DIR}/build_info.h.
+set(SVNSYNC_STAMP_FILE "${CMAKE_CURRENT_BINARY_DIR}/build_info.h")
+add_custom_target(svnsync_stamp ALL
+    COMMAND ${CMAKE_COMMAND}
+        "-DSTAMP_FILE=${SVNSYNC_STAMP_FILE}"
+        "-DVERSION_STRING=${PROJECT_VERSION}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/stamp-build.cmake"
+    BYPRODUCTS "${SVNSYNC_STAMP_FILE}"
+    COMMENT "Stamping build timestamp into build_info.h")
+target_include_directories(svnsyncdrive PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+add_dependencies(svnsyncdrive svnsync_stamp)
+
 target_link_libraries(svnsyncdrive PRIVATE
     svnsync_core
     Qt6::Widgets

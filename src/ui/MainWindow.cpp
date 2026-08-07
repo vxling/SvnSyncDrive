@@ -20,7 +20,7 @@
 #include <QStyle>
 #include <QSystemTrayIcon>
 
-#include <svnplus/SvnClient.h>
+#include "build_info.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -52,10 +52,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_statusText = new QLabel(QStringLiteral("就绪"), this);
     statusBar()->addWidget(m_statusText, 1);
     auto *versionLabel = new QLabel(
-        QStringLiteral("SvnSyncDrive %1 · libsvnplus %2 · Qt %3")
-            .arg(QStringLiteral("0.3.0"),
-                 QString::fromStdString(SvnPlus::SvnClient::version().toString()),
-                 QString::fromLatin1(qVersion())),
+        QStringLiteral("SvnSyncDrive %1 · build %2")
+            .arg(QStringLiteral(SVNSYNC_VERSION),
+                 QStringLiteral(SVNSYNC_BUILD_TIMESTAMP)),
         this);
     versionLabel->setStyleSheet(QStringLiteral("color: #888;"));
     statusBar()->addPermanentWidget(versionLabel);

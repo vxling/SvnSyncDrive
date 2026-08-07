@@ -6,15 +6,15 @@
 #include <QVBoxLayout>
 #include <QtGlobal>
 
-#include <svnplus/SvnClient.h>
+#include "build_info.h"
 
 namespace {
 
 QString buildVersionLine()
 {
-    return QStringLiteral("SvnSyncDrive 0.5.0 · libsvnplus %1 · Qt %2")
-        .arg(QString::fromStdString(SvnPlus::SvnClient::version().toString()),
-             QString::fromLatin1(qVersion()));
+    return QStringLiteral("SvnSyncDrive %1 · build %2")
+        .arg(QStringLiteral(SVNSYNC_VERSION),
+             QStringLiteral(SVNSYNC_BUILD_TIMESTAMP));
 }
 
 } // namespace
