@@ -14,6 +14,8 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
@@ -1228,6 +1230,97 @@ static bool runLiveSync(const QString &url, const QString &wcApp, const QString 
     return upOk && downOk && deepDownOk;
 }
 
+/** Live lock auto-heal validation against a real working copy:
+ *  1. inject a genuine WC lock (WC_LOCK + WORK_QUEUE rows) into .svn/wc.db,
+ *  2. prove a plain update is blocked by the injected lock,
+ *  3. run `svn update` through the production SvnWorker + libsvnplus runner
+ *     and assert the runner cleans the lock up and retries to success.
+ *  synccoretest --lockheal <wc-path> */
+static void runLockHeal(const QString &wc)
+{
+    std::printf("-- lockheal %s --\n", qPrintable(wc));
+    const QString wcDb = wc + QStringLiteral("/.svn/wc.db");
+    if (!QFile::exists(wcDb)) {
+        check(false, "working copy has a .svn/wc.db");
+        return;
+    }
+    check(true, "working copy has a .svn/wc.db");
+
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
+                                                    QStringLiteral("lockheal"));
+        db.setDatabaseName(wcDb);
+        if (!db.open()) {
+            check(false, "wc.db opens");
+            return;
+        }
+        QSqlQuery q(db);
+        if (!q.exec(QStringLiteral("SELECT wc_id FROM WCROOT LIMIT 1")) || !q.next()) {
+            check(false, "wc.db exposes its WCROOT id");
+            db.close();
+            return;
+        }
+        const qlonglong wcId = q.value(0).toLongLong();
+        QString root = wc;
+        const QString esc = QStringLiteral("'")
+            + root.replace(QLatin1Char('\''), QLatin1String("''")) + QStringLiteral("'");
+        const bool lockOk = q.exec(QStringLiteral(
+            "INSERT INTO WC_LOCK (wc_id, local_abspath, lock_token) "
+            "VALUES (%1, %2, 'lockheal-test')").arg(wcId).arg(esc));
+        const bool wqOk = q.exec(QStringLiteral(
+            "INSERT INTO WORK_QUEUE (wc_id, local_abspath, wcroot_abspath, statement) "
+            "VALUES (%1, %2, %2, "
+            "'DELETE FROM WORK_QUEUE WHERE wc_id = %1 AND local_abspath = %2;')")
+                                     .arg(wcId).arg(esc));
+        db.close();
+        QSqlDatabase::removeDatabase(QStringLiteral("lockheal"));
+        check(lockOk, "injected WC_LOCK row");
+        check(wqOk, "injected WORK_QUEUE row");
+        if (!lockOk || !wqOk)
+            return;
+    }
+
+    {
+        SvnPlus::SvnClient client;
+        std::vector<SvnPlus::SvnStatus> statuses;
+        SvnPlus::SvnStatusOptions opts;
+        opts.depth = SvnPlus::SvnDepth::Empty;
+        const SvnPlus::SvnError err = client.status(wc.toStdString(), statuses, opts);
+        bool sawLock = false;
+        for (const auto &s : statuses)
+            if (s.wcIsLocked)
+                sawLock = true;
+        if (err.ok())
+            check(sawLock, "status reports the working-copy lock (pre-check probe)");
+        else
+            std::printf("  note: status failed on the locked wc (%s); the retry path handles it\n",
+                        err.message().c_str());
+    }
+
+    {
+        SvnPlus::SvnClient client;
+        std::vector<SvnPlus::SvnRevision> revisions;
+        const SvnPlus::SvnError err = client.update(
+            { wc.toStdString() }, SvnPlus::SvnRevision::head(),
+            SvnPlus::SvnDepth::Infinity, false, false, &revisions);
+        check(!err.ok() && isWcLockErrorText(QString::fromStdString(err.message())),
+              "plain update is blocked by the injected lock");
+    }
+
+    {
+        SvnWorker worker;
+        ResultCollector col(worker);
+        worker.start();
+        worker.submit(makeItem(Command::Update, wc));
+        const bool got = col.wait(1, 60000);
+        worker.stop();
+        const bool healed = got && !col.results.isEmpty() && col.results.front().success;
+        check(healed, "production worker auto-heals the locked working copy");
+        if (got && !col.results.isEmpty() && !col.results.front().success)
+            std::printf("  update error: %s\n", qPrintable(col.results.front().error));
+    }
+}
+
 int main(int argc, char *argv[])
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1292,6 +1385,11 @@ int main(int argc, char *argv[])
                             int(s.kind), int(s.nodeStatus));
         }
     }
+
+    // Lock auto-heal against a real working copy: synccoretest --lockheal <wc-path>
+    const int lockIdx = args.indexOf(QStringLiteral("--lockheal"));
+    if (lockIdx >= 0 && lockIdx + 1 < args.size())
+        runLockHeal(args.at(lockIdx + 1));
 
     std::printf("==== %s: %d failure(s) ====\n",
                 g_failures == 0 ? "ALL PASS" : "FAILED", g_failures);
