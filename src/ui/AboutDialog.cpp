@@ -1,5 +1,7 @@
 #include "ui/AboutDialog.h"
 
+#include "core/I18n.h"
+
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QPushButton>
@@ -22,7 +24,7 @@ QString buildVersionLine()
 AboutDialog::AboutDialog(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle(QStringLiteral("关于 SvnSyncDrive"));
+    setWindowTitle(I18n::translate("关于 SvnSyncDrive"));
     setMinimumWidth(420);
 
     auto *layout = new QVBoxLayout(this);
@@ -36,7 +38,7 @@ AboutDialog::AboutDialog(QWidget *parent)
     layout->addWidget(title);
 
     auto *subtitle = new QLabel(
-        QStringLiteral("SVN 工作副本双向自动同步工具"), this);
+        I18n::translate("SVN 工作副本双向自动同步工具"), this);
     subtitle->setAlignment(Qt::AlignHCenter);
     subtitle->setStyleSheet(QStringLiteral("color: #666;"));
     layout->addWidget(subtitle);
@@ -49,7 +51,7 @@ AboutDialog::AboutDialog(QWidget *parent)
     layout->addSpacing(12);
 
     auto *desc = new QLabel(
-        QStringLiteral(
+        I18n::translate(
             "SvnSyncDrive 在本地 SVN 工作副本和服务器之间自动同步：\n"
             "· 监控本地文件变化并批量提交到服务器\n"
             "· 周期检查服务器新版本并自动更新到本地\n"
@@ -65,7 +67,7 @@ AboutDialog::AboutDialog(QWidget *parent)
     layout->addSpacing(12);
 
     auto *credit = new QLabel(
-        QStringLiteral("基于 Qt %1 · libsvnplus · Apache Subversion")
+        I18n::translate("基于 Qt %1 · libsvnplus · Apache Subversion")
             .arg(QString::fromLatin1(qVersion())),
         this);
     credit->setAlignment(Qt::AlignHCenter);
@@ -73,7 +75,7 @@ AboutDialog::AboutDialog(QWidget *parent)
     layout->addWidget(credit);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok, this);
-    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("关闭"));
+    buttons->button(QDialogButtonBox::Ok)->setText(I18n::translate("关闭"));
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     layout->addWidget(buttons);
 }

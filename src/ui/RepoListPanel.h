@@ -5,8 +5,10 @@
 #include <QList>
 #include <QWidget>
 
+class QLabel;
 class QListWidget;
 class QListWidgetItem;
+class QPushButton;
 
 /**
  * Left sidebar: the list of configured repositories with a per-repo
@@ -23,6 +25,7 @@ public:
     void setRepositories(const QList<svnsync::Repository> &repositories);
     void setSelectedName(const QString &name);
     void updateState(const QString &name, svnsync::RepoState state);
+    void retranslate();
 
     QString selectedName() const;
 
@@ -37,4 +40,8 @@ private:
     QListWidgetItem *findItem(const QString &name) const;
 
     QListWidget *m_list = nullptr;
+    QLabel *m_title = nullptr;
+    QPushButton *m_addButton = nullptr;
+    QPushButton *m_settingsButton = nullptr;
+    QPushButton *m_aboutButton = nullptr;
 };

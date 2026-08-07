@@ -332,6 +332,8 @@ GlobalConfig ConfigStore::loadGlobalConfig()
             config.autoResolveConflicts = value.toInt() != 0;
         else if (key == QStringLiteral("conflictResolution"))
             config.conflictResolution = value.toInt();
+        else if (key == QStringLiteral("language"))
+            config.language = value;
     }
     return config;
 }
@@ -371,6 +373,7 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         put(QStringLiteral("networkTimeoutSec"), QString::number(config.networkTimeoutSec));
         put(QStringLiteral("autoResolveConflicts"), QString::number(config.autoResolveConflicts));
         put(QStringLiteral("conflictResolution"), QString::number(config.conflictResolution));
+        put(QStringLiteral("language"), config.language);
     }
 
     if (ok)

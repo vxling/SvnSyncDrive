@@ -1,5 +1,6 @@
 #include "ui/FileBrowser.h"
 
+#include "core/I18n.h"
 #include "core/SyncEngine.h"
 
 #include <QApplication>
@@ -193,12 +194,12 @@ FileBrowser::FileBrowser(QWidget *parent)
     auto *buttonsRow = new QHBoxLayout;
     buttonsRow->setSpacing(6);
 
-    auto *syncButton = new QPushButton(QStringLiteral("🔁 立即同步"), toolbar);
-    auto *conflictButton = new QPushButton(QStringLiteral("🛠 解决冲突"), toolbar);
-    m_refreshButton = new QPushButton(QStringLiteral("🔄 刷新"), toolbar);
+    m_syncButton = new QPushButton(I18n::translate("🔁 立即同步"), toolbar);
+    m_conflictButton = new QPushButton(I18n::translate("🛠 解决冲突"), toolbar);
+    m_refreshButton = new QPushButton(I18n::translate("🔄 刷新"), toolbar);
 
-    buttonsRow->addWidget(syncButton);
-    buttonsRow->addWidget(conflictButton);
+    buttonsRow->addWidget(m_syncButton);
+    buttonsRow->addWidget(m_conflictButton);
     buttonsRow->addWidget(m_refreshButton);
     buttonsRow->addStretch(1);
     toolLayout->addLayout(buttonsRow);
@@ -208,9 +209,9 @@ FileBrowser::FileBrowser(QWidget *parent)
     m_table = new QTableWidget(this);
     m_table->setColumnCount(5);
     m_table->setHorizontalHeaderLabels(
-        { QStringLiteral("名称"), QStringLiteral("类型"),
-          QStringLiteral("大小"), QStringLiteral("修改时间"),
-          QStringLiteral("状态") });
+        { I18n::translate("名称"), I18n::translate("类型"),
+          I18n::translate("大小"), I18n::translate("修改时间"),
+          I18n::translate("状态") });
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -228,8 +229,8 @@ FileBrowser::FileBrowser(QWidget *parent)
     m_table->viewport()->installEventFilter(this);
     m_table->setContextMenuPolicy(Qt::CustomContextMenu);
 
-    connect(syncButton, &QPushButton::clicked, this, &FileBrowser::syncRequested);
-    connect(conflictButton, &QPushButton::clicked, this, &FileBrowser::conflictScanRequested);
+    connect(m_syncButton, &QPushButton::clicked, this, &FileBrowser::syncRequested);
+    connect(m_conflictButton, &QPushButton::clicked, this, &FileBrowser::conflictScanRequested);
     connect(m_refreshButton, &QPushButton::clicked, this, &FileBrowser::refresh);
     connect(m_table, &QTableWidget::customContextMenuRequested, this,
             &FileBrowser::showContextMenu);
@@ -286,7 +287,7 @@ void FileBrowser::refreshFor(const QString &dir)
     }
 
     if (!m_engine) {
-        emit statusTextChanged(QStringLiteral("仓库未启用"));
+        emit statusTextChanged(I18n::translate("仓库未启用"));
         return;
     }
 
@@ -341,18 +342,18 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     QAction *copyPathAction = nullptr;
 
     if (info.isDir()) {
-        openAction = menu.addAction(QStringLiteral("打开目录"));
+        openAction = menu.addAction(I18n::translate("打开目录"));
     } else {
-        openAction = menu.addAction(QStringLiteral("打开"));
+        openAction = menu.addAction(I18n::translate("打开"));
     }
-    newFolderAction = menu.addAction(QStringLiteral("新建文件夹"));
-    newTextFileAction = menu.addAction(QStringLiteral("新建文本文件"));
+    newFolderAction = menu.addAction(I18n::translate("新建文件夹"));
+    newTextFileAction = menu.addAction(I18n::translate("新建文本文件"));
     menu.addSeparator();
-    copyPathAction = menu.addAction(QStringLiteral("复制完整路径"));
+    copyPathAction = menu.addAction(I18n::translate("复制完整路径"));
     menu.addSeparator();
 
     // All SVN operations live in one "advanced" submenu.
-    QMenu *advanced = menu.addMenu(QStringLiteral("高级操作"));
+    QMenu *advanced = menu.addMenu(I18n::translate("高级操作"));
     QAction *commitAction = nullptr;
     QAction *updateAction = nullptr;
     QAction *revertAction = nullptr;
@@ -364,14 +365,14 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     const bool isUnversioned = kind == svnsync::StatusKind::Unversioned;
 
     if (isUnversioned) {
-        addAction = advanced->addAction(QStringLiteral("添加到版本库 (Add)"));
+        addAction = advanced->addAction(I18n::translate("添加到版本库 (Add)"));
     } else {
-        commitAction = advanced->addAction(QStringLiteral("提交… (Commit)"));
-        updateAction = advanced->addAction(QStringLiteral("更新 (Update)"));
-        revertAction = advanced->addAction(QStringLiteral("还原 (Revert)"));
+        commitAction = advanced->addAction(I18n::translate("提交… (Commit)"));
+        updateAction = advanced->addAction(I18n::translate("更新 (Update)"));
+        revertAction = advanced->addAction(I18n::translate("还原 (Revert)"));
     }
-    deleteAction = advanced->addAction(QStringLiteral("从版本库删除 (Delete)"));
-    renameAction = advanced->addAction(QStringLiteral("重命名… (Move)"));
+    deleteAction = advanced->addAction(I18n::translate("从版本库删除 (Delete)"));
+    renameAction = advanced->addAction(I18n::translate("重命名… (Move)"));
 
     for (QAction *a : { commitAction, updateAction, revertAction, addAction,
                         deleteAction, renameAction }) {
@@ -409,8 +410,8 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     if (chosen == commitAction) {
         bool ok = false;
         const QString message = QInputDialog::getMultiLineText(
-            this, QStringLiteral("提交"),
-            QStringLiteral("提交日志：\n%1").arg(fullPath),
+            this, I18n::translate("提交"),
+            I18n::translate("提交日志：\n%1").arg(fullPath),
             QString(), &ok);
         if (!ok || message.trimmed().isEmpty())
             return;
@@ -423,8 +424,8 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     }
     if (chosen == revertAction) {
         const auto ret = QMessageBox::question(
-            this, QStringLiteral("还原"),
-            QStringLiteral("确定要还原以下路径的全部本地修改？\n\n%1")
+            this, I18n::translate("还原"),
+            I18n::translate("确定要还原以下路径的全部本地修改？\n\n%1")
                 .arg(fullPath),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (ret != QMessageBox::Yes)
@@ -434,8 +435,8 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     }
     if (chosen == deleteAction) {
         const auto ret = QMessageBox::question(
-            this, QStringLiteral("删除"),
-            QStringLiteral("确定要从版本库删除以下路径（保留本地文件）？\n\n%1")
+            this, I18n::translate("删除"),
+            I18n::translate("确定要从版本库删除以下路径（保留本地文件）？\n\n%1")
                 .arg(fullPath),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (ret != QMessageBox::Yes)
@@ -446,7 +447,7 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     if (chosen == renameAction) {
         bool ok = false;
         const QString newName = QInputDialog::getText(
-            this, QStringLiteral("重命名"), QStringLiteral("新名称："),
+            this, I18n::translate("重命名"), I18n::translate("新名称："),
             QLineEdit::Normal, name, &ok);
         if (!ok || newName.trimmed().isEmpty() || newName.trimmed() == name)
             return;
@@ -470,13 +471,13 @@ void FileBrowser::openEntry(const QString &fullPath)
 void FileBrowser::createNewEntry(bool isDir)
 {
     const QString baseName = isDir
-        ? QStringLiteral("新建文件夹")
-        : QStringLiteral("新建文本文件.txt");
+        ? I18n::translate("新建文件夹")
+        : I18n::translate("新建文本文件.txt");
     bool ok = false;
     const QString name = QInputDialog::getText(
         this,
-        isDir ? QStringLiteral("新建文件夹") : QStringLiteral("新建文本文件"),
-        QStringLiteral("名称："), QLineEdit::Normal, baseName, &ok);
+        isDir ? I18n::translate("新建文件夹") : I18n::translate("新建文本文件"),
+        I18n::translate("名称："), QLineEdit::Normal, baseName, &ok);
     if (!ok || name.trimmed().isEmpty())
         return;
 
@@ -532,13 +533,13 @@ void FileBrowser::submitAction(svnsync::Command command,
         if (!self)
             return;
         if (r.success) {
-            self->emit statusTextChanged(QStringLiteral("操作成功"));
+            self->emit statusTextChanged(I18n::translate("操作成功"));
             if (self->m_currentDir == dirToRefresh)
                 self->refresh();
         } else {
-            self->emit statusTextChanged(QStringLiteral("操作失败"));
+            self->emit statusTextChanged(I18n::translate("操作失败"));
             QMessageBox::warning(
-                self, QStringLiteral("SVN 操作失败"), r.error);
+                self, I18n::translate("SVN 操作失败"), r.error);
         }
     });
 }
@@ -747,6 +748,7 @@ void FileBrowser::populate(const QList<Entry> &entries)
 
         auto *nameItem = new QTableWidgetItem(entry.name);
         nameItem->setData(Qt::UserRole, entry.name);
+        nameItem->setData(Qt::UserRole + 1, entry.isDir);
         const QIcon icon = entry.isDir
             ? icons.icon(QFileIconProvider::Folder)
             : icons.icon(QFileInfo(entry.path));
@@ -755,7 +757,7 @@ void FileBrowser::populate(const QList<Entry> &entries)
             nameItem->setToolTip(entry.path);
         m_table->setItem(row, 0, nameItem);
 
-        auto *typeItem = new QTableWidgetItem(entry.isDir ? QStringLiteral("目录") : QString());
+        auto *typeItem = new QTableWidgetItem(entry.isDir ? I18n::translate("目录") : QString());
         typeItem->setTextAlignment(Qt::AlignCenter);
         m_table->setItem(row, 1, typeItem);
 
@@ -777,10 +779,29 @@ void FileBrowser::populate(const QList<Entry> &entries)
 
     const int count = sorted.size();
     emit statusTextChanged(
-        count > 0 ? QStringLiteral("%1 项").arg(count) : QStringLiteral("（空目录）"));
+        count > 0 ? I18n::translate("%1 项").arg(count) : I18n::translate("（空目录）"));
 }
 
 int FileBrowser::itemCount() const
 {
     return m_table->rowCount();
+}
+
+void FileBrowser::retranslate()
+{
+    m_syncButton->setText(I18n::translate("🔁 立即同步"));
+    m_conflictButton->setText(I18n::translate("🛠 解决冲突"));
+    m_refreshButton->setText(I18n::translate("🔄 刷新"));
+    m_table->setHorizontalHeaderLabels(
+        { I18n::translate("名称"), I18n::translate("类型"),
+          I18n::translate("大小"), I18n::translate("修改时间"),
+          I18n::translate("状态") });
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        const QTableWidgetItem *nameItem = m_table->item(row, 0);
+        if (!nameItem)
+            continue;
+        const bool isDir = nameItem->data(Qt::UserRole + 1).toBool();
+        if (QTableWidgetItem *typeItem = m_table->item(row, 1))
+            typeItem->setText(isDir ? I18n::translate("目录") : QString());
+    }
 }

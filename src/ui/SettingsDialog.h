@@ -23,6 +23,7 @@ public:
     svnsync::GlobalConfig config() const;
 
 private:
+    QComboBox *m_language = nullptr;
     QSpinBox *m_pollSeconds = nullptr;
     QSpinBox *m_fullSyncMinutes = nullptr;
     QCheckBox *m_autoAdd = nullptr;

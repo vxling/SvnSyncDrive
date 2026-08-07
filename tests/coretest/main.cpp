@@ -1,5 +1,6 @@
 #include "core/ConfigStore.h"
 #include "core/CredCrypto.h"
+#include "core/I18n.h"
 #include "core/ICommandRunner.h"
 #include "core/LogStore.h"
 #include "core/RepoManager.h"
@@ -965,6 +966,7 @@ static bool testGlobalConfigRoundtrip()
     check(defaults.networkTimeoutSec == 60, "default network timeout");
     check(!defaults.autoResolveConflicts, "default auto-resolve off");
     check(defaults.conflictResolution == 2, "default conflict resolution is MineFull");
+    check(defaults.language == QStringLiteral("zh_CN"), "default language is Chinese");
 
     // Custom values survive a save + load (and a re-open of the file).
     GlobalConfig custom;
@@ -979,6 +981,7 @@ static bool testGlobalConfigRoundtrip()
     custom.networkTimeoutSec = 120;
     custom.autoResolveConflicts = true;
     custom.conflictResolution = 1;
+    custom.language = QStringLiteral("en");
     ConfigStore::saveGlobalConfig(custom);
 
     GlobalConfig loaded = ConfigStore::loadGlobalConfig();
@@ -993,6 +996,7 @@ static bool testGlobalConfigRoundtrip()
     check(loaded.networkTimeoutSec == 120, "network timeout round-trips");
     check(loaded.autoResolveConflicts, "auto-resolve round-trips");
     check(loaded.conflictResolution == 1, "conflict resolution round-trips");
+    check(loaded.language == QStringLiteral("en"), "language round-trips");
 
     // A reload from a fresh connection (app restart) sees the same values.
     ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
@@ -1002,6 +1006,38 @@ static bool testGlobalConfigRoundtrip()
           "values survive a restart (re-opened database)");
 
     ConfigStore::setDatabaseFileForTest(QString());
+    return true;
+}
+
+/** Runtime language switching: Chinese source is the default, switching to
+ *  English returns translated text, and the Chinese mode is restored so the
+ *  later conflict-label assertions keep passing. */
+static bool testI18n()
+{
+    std::printf("-- I18n language switching --\n");
+
+    I18n::setLanguage(QStringLiteral("zh_CN"));
+    check(I18n::language() == QStringLiteral("zh_CN"), "language() reports Chinese");
+    check(I18n::translate("保存") == QStringLiteral("保存"), "Chinese mode returns source text");
+    check(I18n::translate("不存在的字符串xyz") == QStringLiteral("不存在的字符串xyz"),
+          "untranslated keys keep the Chinese source");
+
+    I18n::setLanguage(QStringLiteral("en"));
+    check(I18n::language() == QStringLiteral("en"), "language() reports English");
+    check(I18n::translate("保存") == QStringLiteral("Save"), "translated 'Save'");
+    check(I18n::translate("设置") == QStringLiteral("Settings"), "translated 'Settings'");
+    check(I18n::translate("仓库") == QStringLiteral("Repositories"), "translated 'Repositories'");
+    check(I18n::translate("名称") == QStringLiteral("Name"), "translated 'Name'");
+    check(SyncEngine::conflictChoiceName(2) == QStringLiteral("Use my version"),
+          "conflict choice labels translate to English");
+    check(SyncEngine::conflictChoiceName(99) == QStringLiteral("Unknown (99)"),
+          "unknown choice label falls back to the English pattern");
+
+    // Unknown codes are normalized back to the default language.
+    I18n::setLanguage(QStringLiteral("fr_FR"));
+    check(I18n::language() == QStringLiteral("zh_CN"), "unknown code normalized to zh_CN");
+    check(SyncEngine::conflictChoiceName(2) == QStringLiteral("使用我的版本"),
+          "Chinese labels restored for later assertions");
     return true;
 }
 
@@ -1356,6 +1392,7 @@ int main(int argc, char *argv[])
     testSyncEngineGroupByDir();
     testSyncEngineCommitMessage();
     testSyncEngineMergeToDirs();
+    testI18n();
     testSyncEngineResolveChoice();
     testSyncEngineAutoResolve();
     testSyncEngineClassify();

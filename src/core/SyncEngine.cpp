@@ -1,5 +1,6 @@
 #include "core/SyncEngine.h"
 
+#include "core/I18n.h"
 #include "core/RepoWatcher.h"
 #include "core/SvnWorker.h"
 
@@ -129,7 +130,7 @@ void SyncEngine::start()
     m_worker->setCommandTimeoutSec(m_config.networkTimeoutSec + 10);
 
     if (!m_watcher->start(m_repo.path))
-        notify(tr("无法监听目录: %1").arg(m_repo.path));
+        notify(I18n::translate("无法监听目录: %1").arg(m_repo.path));
 
     m_pollTimer.start();
     m_fullSyncTimer.start();
@@ -266,9 +267,9 @@ void SyncEngine::enqueueFileChange(const QString &path)
                 del.path = path;
                 submit(del, [this, path](const CommandResult &dr) {
                     if (dr.success)
-                        notify(tr("已删除: %1").arg(path));
+                        notify(I18n::translate("已删除: %1").arg(path));
                     else
-                        notify(tr("删除失败: %1（%2）").arg(path).arg(dr.error));
+                        notify(I18n::translate("删除失败: %1（%2）").arg(path).arg(dr.error));
                 });
             }
         });
@@ -290,7 +291,7 @@ void SyncEngine::scanAndCommit()
     statusItem.path = m_repo.path;
     submit(statusItem, [this](const CommandResult &r) {
         if (!r.success) {
-            notify(tr("批量同步扫描失败: %1").arg(r.error));
+            notify(I18n::translate("批量同步扫描失败: %1").arg(r.error));
             finishScan();
             return;
         }
@@ -333,9 +334,9 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
                 m_pendingAdds.remove(p);
                 if (r.success) {
                     ++m_scanAdds;
-                    notify(tr("已添加: %1").arg(p));
+                    notify(I18n::translate("已添加: %1").arg(p));
                 } else {
-                    notify(tr("添加失败: %1（%2）").arg(p).arg(r.error));
+                    notify(I18n::translate("添加失败: %1（%2）").arg(p).arg(r.error));
                 }
                 onAutoAddCompleted();
             });
@@ -356,10 +357,10 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
             if (r.success && r.revision > 0) {
                 m_lastLocalRev = qMax(m_lastLocalRev, r.revision);
                 ++m_scanCommits;
-                notify(tr("自动提交: %1（%2 个文件）→ r%3")
+                notify(I18n::translate("自动提交: %1（%2 个文件）→ r%3")
                            .arg(g.dir).arg(g.count).arg(r.revision));
             } else {
-                notify(tr("提交失败: %1（%2）").arg(g.dir).arg(r.error));
+                notify(I18n::translate("提交失败: %1（%2）").arg(g.dir).arg(r.error));
             }
             onCommitCompleted();
         });
@@ -395,7 +396,7 @@ void SyncEngine::finishScan()
         return;
     m_scanning = false;
     emit filesChanged();
-    notify(tr("批量同步完成：新增 %1 个文件，提交 %2 个目录")
+    notify(I18n::translate("批量同步完成：新增 %1 个文件，提交 %2 个目录")
                .arg(m_scanAdds).arg(m_scanCommits));
     if (m_rescanPending) {
         m_rescanPending = false;
@@ -503,7 +504,7 @@ void SyncEngine::fullSync()
     // monitoring is never silently lost.
     if (m_watcher->isSuspended()) {
         m_watcher->setSuspended(false);
-        notify(tr("文件监听处于挂起状态，已自动恢复。"));
+        notify(I18n::translate("文件监听处于挂起状态，已自动恢复。"));
     }
     // Silence the watcher while update rewrites the working copy; resumed in
     // the update callback (both success and failure).
@@ -520,7 +521,7 @@ void SyncEngine::fullSync()
             // Nothing was updated, so the whole full-sync cycle failed: report
             // it as a failure and skip the pointless conflict scan + scan/commit
             // that would only produce more network errors.
-            notify(tr("定时全量同步失败: %1").arg(r.error));
+            notify(I18n::translate("定时全量同步失败: %1").arg(r.error));
             return;
         }
         detectConflicts([this, r]() {
@@ -529,12 +530,12 @@ void SyncEngine::fullSync()
             const int count = r.value.toInt(&countOk);
             if (r.revision > 0) {
                 if (countOk && count > 0)
-                    notify(tr("定时全量同步完成（更新到 r%1，%2 个文件/目录）")
+                    notify(I18n::translate("定时全量同步完成（更新到 r%1，%2 个文件/目录）")
                                .arg(r.revision).arg(count));
                 else
-                    notify(tr("定时全量同步完成（更新到 r%1）").arg(r.revision));
+                    notify(I18n::translate("定时全量同步完成（更新到 r%1）").arg(r.revision));
             } else {
-                notify(tr("定时全量同步完成"));
+                notify(I18n::translate("定时全量同步完成"));
             }
             scanAndCommit();
         });
@@ -549,7 +550,7 @@ void SyncEngine::startUpdateInChunks(qlonglong serverRev, qlonglong localRev)
     statusItem.checkOutOfDate = true;
     submit(statusItem, [this, serverRev, localRev](const CommandResult &r) {
         if (!r.success) {
-            notify(tr("获取远端变更失败: %1").arg(r.error));
+            notify(I18n::translate("获取远端变更失败: %1").arg(r.error));
             m_polling = false;
             return;
         }
@@ -602,15 +603,15 @@ void SyncEngine::afterUpdateDone(qlonglong serverRev, qlonglong localRev,
 {
     m_watcher->setSuspended(false);
     detectConflicts([this, serverRev, localRev, remotePaths, updatedCount]() {
-        const QString base = tr("已从服务器更新 r%1 → r%2")
+        const QString base = I18n::translate("已从服务器更新 r%1 → r%2")
                                  .arg(localRev).arg(serverRev);
         if (updatedCount > 0) {
-            const QString pathsText = remotePaths.join(QStringLiteral("、"));
+            const QString pathsText = remotePaths.join(I18n::translate("、"));
             if (pathsText.size() <= 80)
-                notify(tr("%1：%2（%3 个文件/目录）")
+                notify(I18n::translate("%1：%2（%3 个文件/目录）")
                            .arg(base, pathsText).arg(updatedCount));
             else
-                notify(tr("%1：%2 个文件/目录").arg(base).arg(updatedCount));
+                notify(I18n::translate("%1：%2 个文件/目录").arg(base).arg(updatedCount));
         } else {
             notify(base);
         }
@@ -658,13 +659,13 @@ void SyncEngine::resolveConflicts(const QStringList &conflicts,
         resolvePath(path, code, treeConflicts.contains(path),
                     [this, path](const CommandResult &r) {
                         if (r.success)
-                            notify(tr("已自动解决冲突: %1").arg(path));
+                            notify(I18n::translate("已自动解决冲突: %1").arg(path));
                         else
-                            notify(tr("自动解决冲突失败: %1（%2）").arg(path).arg(r.error));
+                            notify(I18n::translate("自动解决冲突失败: %1（%2）").arg(path).arg(r.error));
                     });
     }
 
-    notify(tr("已按默认方式自动解决 %1 个冲突（树冲突一律保留当前工作副本状态）")
+    notify(I18n::translate("已按默认方式自动解决 %1 个冲突（树冲突一律保留当前工作副本状态）")
                .arg(conflicts.size()));
 }
 
@@ -724,13 +725,13 @@ int SyncEngine::resolveConflictCode(const QString &path, const QStringList &tree
 QString SyncEngine::conflictChoiceName(int code)
 {
     switch (code) {
-    case 0: return QStringLiteral("使用基线版本");
-    case 1: return QStringLiteral("使用他们的版本");
-    case 2: return QStringLiteral("使用我的版本");
-    case 3: return QStringLiteral("使用他们的版本（冲突标记）");
-    case 4: return QStringLiteral("使用我的版本（冲突标记）");
-    case 5: return QStringLiteral("标记为已合并");
-    default: return QStringLiteral("未知（%1）").arg(code);
+    case 0: return I18n::translate("使用基线版本");
+    case 1: return I18n::translate("使用他们的版本");
+    case 2: return I18n::translate("使用我的版本");
+    case 3: return I18n::translate("使用他们的版本（冲突标记）");
+    case 4: return I18n::translate("使用我的版本（冲突标记）");
+    case 5: return I18n::translate("标记为已合并");
+    default: return I18n::translate("未知（%1）").arg(code);
     }
 }
 

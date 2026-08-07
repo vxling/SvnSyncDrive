@@ -1,5 +1,7 @@
 #include "ui/RepoListPanel.h"
 
+#include "core/I18n.h"
+
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLinearGradient>
@@ -15,11 +17,11 @@ namespace {
 QString stateBadge(svnsync::RepoState state)
 {
     switch (state) {
-    case svnsync::RepoState::Active: return QStringLiteral("● 同步中");
-    case svnsync::RepoState::Background: return QStringLiteral("◐ 后台");
-    case svnsync::RepoState::Deactive: return QStringLiteral("○ 停止监控");
-    case svnsync::RepoState::AuthFailed: return QStringLiteral("✕ 认证失败");
-    case svnsync::RepoState::Disconnected: return QStringLiteral("✖ 断开链接");
+    case svnsync::RepoState::Active: return I18n::translate("● 同步中");
+    case svnsync::RepoState::Background: return I18n::translate("◐ 后台");
+    case svnsync::RepoState::Deactive: return I18n::translate("○ 停止监控");
+    case svnsync::RepoState::AuthFailed: return I18n::translate("✕ 认证失败");
+    case svnsync::RepoState::Disconnected: return I18n::translate("✖ 断开链接");
     }
     return QString();
 }
@@ -89,37 +91,37 @@ RepoListPanel::RepoListPanel(QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
 
-    auto *title = new QLabel(QStringLiteral("仓库"), this);
-    QFont titleFont = title->font();
+    m_title = new QLabel(I18n::translate("仓库"), this);
+    QFont titleFont = m_title->font();
     titleFont.setPointSize(titleFont.pointSize() + 1);
     titleFont.setBold(true);
-    title->setFont(titleFont);
-    layout->addWidget(title);
+    m_title->setFont(titleFont);
+    layout->addWidget(m_title);
 
     m_list = new QListWidget(this);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);
     layout->addWidget(m_list, 1);
 
-    auto *addButton = new QPushButton(QStringLiteral("+ 添加仓库"), this);
-    auto *settingsButton = new QPushButton(QStringLiteral("⚙ 设置"), this);
-    auto *aboutButton = new QPushButton(QStringLiteral("ℹ 关于"), this);
+    m_addButton = new QPushButton(I18n::translate("+ 添加仓库"), this);
+    m_settingsButton = new QPushButton(I18n::translate("⚙ 设置"), this);
+    m_aboutButton = new QPushButton(I18n::translate("ℹ 关于"), this);
 
     // Bottom action buttons: 50% of the main layout spacing (3px) and 80%
     // taller, for easier clicking.
     auto *actionsLayout = new QVBoxLayout;
     actionsLayout->setSpacing(3);
-    for (auto *button : { static_cast<QWidget *>(addButton),
-                          static_cast<QWidget *>(settingsButton),
-                          static_cast<QWidget *>(aboutButton) }) {
+    for (auto *button : { static_cast<QWidget *>(m_addButton),
+                          static_cast<QWidget *>(m_settingsButton),
+                          static_cast<QWidget *>(m_aboutButton) }) {
         button->setMinimumHeight(
             qRound(static_cast<QPushButton *>(button)->sizeHint().height() * 1.44));
         actionsLayout->addWidget(button);
     }
     layout->addLayout(actionsLayout);
 
-    connect(addButton, &QPushButton::clicked, this, &RepoListPanel::addRequested);
-    connect(settingsButton, &QPushButton::clicked, this, &RepoListPanel::settingsRequested);
-    connect(aboutButton, &QPushButton::clicked, this, &RepoListPanel::aboutRequested);
+    connect(m_addButton, &QPushButton::clicked, this, &RepoListPanel::addRequested);
+    connect(m_settingsButton, &QPushButton::clicked, this, &RepoListPanel::settingsRequested);
+    connect(m_aboutButton, &QPushButton::clicked, this, &RepoListPanel::aboutRequested);
     connect(m_list, &QListWidget::itemSelectionChanged, this, [this] {
         const auto items = m_list->selectedItems();
         if (!items.isEmpty())
@@ -137,6 +139,7 @@ void RepoListPanel::setRepositories(const QList<svnsync::Repository> &repositori
         auto *item = new QListWidgetItem(m_list);
         item->setData(Qt::UserRole, repo.name);
         item->setData(Qt::UserRole + 1, repo.path);
+        item->setData(Qt::UserRole + 2, static_cast<int>(repo.state));
         item->setSizeHint(QSize(0, 64));
         rebuildRow(item, repo);
     }
@@ -197,8 +200,31 @@ void RepoListPanel::updateState(const QString &name, svnsync::RepoState state)
         const svnsync::Repository repo = { name,
                                            item->data(Qt::UserRole + 1).toString(),
                                            QString(), QString(), QString(), state };
+        item->setData(Qt::UserRole + 2, static_cast<int>(state));
         rebuildRow(item, repo);
     }
+}
+
+void RepoListPanel::retranslate()
+{
+    m_title->setText(I18n::translate("仓库"));
+    m_addButton->setText(I18n::translate("+ 添加仓库"));
+    m_settingsButton->setText(I18n::translate("⚙ 设置"));
+    m_aboutButton->setText(I18n::translate("ℹ 关于"));
+
+    // Rebuild the row widgets so the state badges pick up the new language.
+    m_list->blockSignals(true);
+    for (int i = 0; i < m_list->count(); ++i) {
+        QListWidgetItem *item = m_list->item(i);
+        const svnsync::Repository repo = {
+            item->data(Qt::UserRole).toString(),
+            item->data(Qt::UserRole + 1).toString(),
+            QString(), QString(), QString(),
+            static_cast<svnsync::RepoState>(item->data(Qt::UserRole + 2).toInt())
+        };
+        rebuildRow(item, repo);
+    }
+    m_list->blockSignals(false);
 }
 
 QString RepoListPanel::selectedName() const

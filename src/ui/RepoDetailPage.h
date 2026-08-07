@@ -7,6 +7,8 @@
 
 class QLabel;
 class QPlainTextEdit;
+class QPushButton;
+class QTabWidget;
 
 namespace svnsync {
 class SyncEngine;
@@ -33,6 +35,7 @@ public:
     void appendLog(const QString &message);
     void setLogHistory(const QStringList &lines);
     void refreshFiles();
+    void retranslate();
 
     QString repoName() const { return m_name; }
 
@@ -49,5 +52,8 @@ private:
     QLabel *m_nameLabel = nullptr;
     QLabel *m_stateLabel = nullptr;
     QPlainTextEdit *m_log = nullptr;
+    QTabWidget *m_tabs = nullptr;
+    QPushButton *m_configureButton = nullptr;
+    QPushButton *m_removeButton = nullptr;
     FileBrowser *m_browser = nullptr;
 };

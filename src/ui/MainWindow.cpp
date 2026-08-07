@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 
+#include "core/I18n.h"
 #include "core/LogStore.h"
 #include "core/RepoManager.h"
 #include "core/SyncEngine.h"
@@ -41,7 +42,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_pages = new QStackedWidget(central);
     m_emptyPage = new QLabel(
-        QStringLiteral("选择一个仓库查看文件与同步日志，\n或点击左侧「+ 添加仓库」。"),
+        I18n::translate("选择一个仓库查看文件与同步日志，\n或点击左侧「+ 添加仓库」。"),
         m_pages);
     m_emptyPage->setAlignment(Qt::AlignCenter);
     m_pages->addWidget(m_emptyPage);
@@ -49,7 +50,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(central);
 
-    m_statusText = new QLabel(QStringLiteral("就绪"), this);
+    m_statusText = new QLabel(I18n::translate("就绪"), this);
     statusBar()->addWidget(m_statusText, 1);
     auto *versionLabel = new QLabel(
         QStringLiteral("SvnSyncDrive %1 · build %2")
@@ -96,6 +97,9 @@ MainWindow::MainWindow(QWidget *parent)
     rebuildSidebar();
 
     setupTrayIcon();
+
+    connect(I18n::instance(), &I18n::languageChanged, this,
+            [this] { retranslateUi(); });
 
     // Select the first running repository (prefer the persisted Active one).
     const auto repos = m_manager->repositories();
@@ -174,8 +178,8 @@ void MainWindow::onStateChanged(const QString &name, svnsync::RepoState state)
 void MainWindow::onRemoveRequested(const QString &name)
 {
     const auto answer = QMessageBox::question(
-        this, QStringLiteral("移除仓库"),
-        QStringLiteral("确定要移除仓库「%1」吗？\n（不会删除本地文件，只会停止同步并从列表移除。）")
+        this, I18n::translate("移除仓库"),
+        I18n::translate("确定要移除仓库「%1」吗？\n（不会删除本地文件，只会停止同步并从列表移除。）")
             .arg(name),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (answer != QMessageBox::Yes)
@@ -215,8 +219,10 @@ void MainWindow::onSettingsRequested()
     dialog.setConfig(m_manager->config());
     if (dialog.exec() != QDialog::Accepted)
         return;
-    m_manager->setConfig(dialog.config());
-    setGlobalStatus(QStringLiteral("设置已保存"));
+    const svnsync::GlobalConfig config = dialog.config();
+    m_manager->setConfig(config);
+    I18n::setLanguage(config.language);
+    setGlobalStatus(I18n::translate("设置已保存"));
 }
 
 void MainWindow::setupTrayIcon()
@@ -233,13 +239,13 @@ void MainWindow::setupTrayIcon()
         m_trayIcon->setIcon(style()->standardIcon(QStyle::SP_ComputerIcon));
 
     auto *menu = new QMenu(this);
-    auto *showAction = menu->addAction(QStringLiteral("显示主窗口"));
-    auto *quitAction = menu->addAction(QStringLiteral("退出"));
+    m_trayShowAction = menu->addAction(I18n::translate("显示主窗口"));
+    m_trayQuitAction = menu->addAction(I18n::translate("退出"));
     menu->addSeparator();
     m_trayIcon->setContextMenu(menu);
 
-    connect(showAction, &QAction::triggered, this, &MainWindow::showWindowFromTray);
-    connect(quitAction, &QAction::triggered, this, &MainWindow::quitApplication);
+    connect(m_trayShowAction, &QAction::triggered, this, &MainWindow::showWindowFromTray);
+    connect(m_trayQuitAction, &QAction::triggered, this, &MainWindow::quitApplication);
     connect(m_trayIcon, &QSystemTrayIcon::activated, this,
             [this](QSystemTrayIcon::ActivationReason reason) {
                 if (reason == QSystemTrayIcon::Trigger
@@ -292,10 +298,10 @@ void MainWindow::logToRepo(const QString &name, const QString &message)
 void MainWindow::onConflictDetected(const QString &name, const QStringList &paths,
                                     const QStringList &treeConflictPaths)
 {
-    logToRepo(name, QStringLiteral("[冲突] %1 个文件：%2")
+    logToRepo(name, I18n::translate("[冲突] %1 个文件：%2")
               .arg(paths.size()).arg(paths.join(QStringLiteral(", "))));
     if (!treeConflictPaths.isEmpty())
-        logToRepo(name, QStringLiteral("[冲突] 其中 %1 个为树冲突（将按保留当前状态处理）：%2")
+        logToRepo(name, I18n::translate("[冲突] 其中 %1 个为树冲突（将按保留当前状态处理）：%2")
                   .arg(treeConflictPaths.size())
                   .arg(treeConflictPaths.join(QStringLiteral(", "))));
     svnsync::SyncEngine *engine = m_manager->engine(name);
@@ -312,12 +318,12 @@ void MainWindow::onConflictResolved(const QString &name, const QString &path,
                                     bool success, const QString &error)
 {
     const QString choice = treeConflict
-        ? QStringLiteral("保留当前工作副本状态")
+        ? I18n::translate("保留当前工作副本状态")
         : svnsync::SyncEngine::conflictChoiceName(choiceCode);
     if (success)
-        logToRepo(name, QStringLiteral("[冲突] 已解决：%1（%2）").arg(path, choice));
+        logToRepo(name, I18n::translate("[冲突] 已解决：%1（%2）").arg(path, choice));
     else
-        logToRepo(name, QStringLiteral("[冲突] 解决失败：%1（%2）：%3")
+        logToRepo(name, I18n::translate("[冲突] 解决失败：%1（%2）：%3")
                       .arg(path, choice, error));
 }
 
@@ -328,7 +334,7 @@ void MainWindow::scanConflicts(const QString &name)
         return;
     svnsync::SyncEngine *engine = m_manager->engine(name);
     if (!engine) {
-        logToRepo(name, QStringLiteral("仓库已停用，无法扫描冲突。"));
+        logToRepo(name, I18n::translate("仓库已停用，无法扫描冲突。"));
         return;
     }
     svnsync::CommandItem item;
@@ -347,7 +353,7 @@ void MainWindow::scanConflicts(const QString &name)
         if (!paths.isEmpty()) {
             onConflictDetected(name, paths, treePaths);
         } else {
-            logToRepo(name, QStringLiteral("没有发现冲突文件。"));
+            logToRepo(name, I18n::translate("没有发现冲突文件。"));
         }
     });
 }
@@ -385,7 +391,7 @@ RepoDetailPage *MainWindow::pageFor(const QString &name)
             return;
         const auto updated = dialog.repository();
         m_manager->setCredentials(name, updated.username, updated.password);
-        logToRepo(name, QStringLiteral("已更新仓库凭据。"));
+        logToRepo(name, I18n::translate("已更新仓库凭据。"));
     });
     connect(page, &RepoDetailPage::conflictScanRequested, this, [this, name] {
         scanConflicts(name);
@@ -399,4 +405,17 @@ RepoDetailPage *MainWindow::pageFor(const QString &name)
 void MainWindow::setGlobalStatus(const QString &text)
 {
     m_statusText->setText(text);
+}
+
+void MainWindow::retranslateUi()
+{
+    m_emptyPage->setText(
+        I18n::translate("选择一个仓库查看文件与同步日志，\n或点击左侧「+ 添加仓库」。"));
+    if (m_trayShowAction)
+        m_trayShowAction->setText(I18n::translate("显示主窗口"));
+    if (m_trayQuitAction)
+        m_trayQuitAction->setText(I18n::translate("退出"));
+    m_sidebar->retranslate();
+    for (auto it = m_pagesByRepo.constBegin(); it != m_pagesByRepo.constEnd(); ++it)
+        it.value()->retranslate();
 }

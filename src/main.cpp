@@ -3,8 +3,12 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 
+#include "core/ConfigStore.h"
+#include "core/I18n.h"
 #include "core/Repository.h"
 #include "ui/MainWindow.h"
+
+#include "build_info.h"
 
 namespace {
 
@@ -25,8 +29,12 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName("SvnSyncDrive");
     app.setOrganizationName("SvnSyncDrive");
-    app.setApplicationVersion("0.3.0");
+    app.setApplicationVersion(QStringLiteral(SVNSYNC_VERSION));
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
+
+    // Apply the persisted UI language before any widget is constructed, so
+    // everything built later already shows the right language.
+    I18n::setLanguage(svnsync::ConfigStore::loadGlobalConfig().language);
 
     const QString key = instanceKey();
 

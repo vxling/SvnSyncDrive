@@ -59,6 +59,7 @@ add_library(svnsync_core STATIC
     src/core/SyncEngine.cpp
     src/core/RepoManager.cpp
     src/core/ConfigStore.cpp
+    src/core/I18n.cpp
     src/core/CredCrypto.cpp
     src/core/LogStore.cpp
     src/core/AppLog.cpp
@@ -71,6 +72,7 @@ add_library(svnsync_core STATIC
     src/core/SyncEngine.h
     src/core/RepoManager.h
     src/core/ConfigStore.h
+    src/core/I18n.h
     src/core/CredCrypto.h
     src/core/LogStore.h
     src/core/AppLog.h

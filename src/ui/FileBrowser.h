@@ -37,6 +37,7 @@ public:
     /** Point the browser at a working copy and jump to its root. */
     void setRepository(const QString &wcPath);
     void refresh();
+    void retranslate();
 
     int itemCount() const;
 
@@ -104,6 +105,8 @@ private:
     QSet<QString> m_unversioned;
 
     QLabel *m_pathLabel = nullptr;
+    QPushButton *m_syncButton = nullptr;
+    QPushButton *m_conflictButton = nullptr;
     QPushButton *m_refreshButton = nullptr;
     QTableWidget *m_table = nullptr;
 };

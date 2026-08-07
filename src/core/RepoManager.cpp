@@ -1,6 +1,7 @@
 #include "core/RepoManager.h"
 
 #include "core/ConfigStore.h"
+#include "core/I18n.h"
 #include "core/LogStore.h"
 #include "core/SyncEngine.h"
 
@@ -197,7 +198,7 @@ void RepoManager::markAuthFailed(const QString &name)
     m_repos[i].state = RepoState::AuthFailed;
     persist();  // writes the durable Background equivalent, not the transient state
     emit repositoryStateChanged(name, RepoState::AuthFailed);
-    emit notification(name, tr("认证失败，已停止同步。请在仓库配置中更新凭据后恢复。"));
+    emit notification(name, I18n::translate("认证失败，已停止同步。请在仓库配置中更新凭据后恢复。"));
 }
 
 void RepoManager::markDisconnected(const QString &name)
@@ -210,7 +211,7 @@ void RepoManager::markDisconnected(const QString &name)
     m_priorStates[name] = m_repos[i].state;
     m_repos[i].state = RepoState::Disconnected;
     emit repositoryStateChanged(name, RepoState::Disconnected);
-    emit notification(name, tr("连接断开（连续多次服务器访问失败），将继续重试…"));
+    emit notification(name, I18n::translate("连接断开（连续多次服务器访问失败），将继续重试…"));
 }
 
 void RepoManager::clearDisconnected(const QString &name)
@@ -224,7 +225,7 @@ void RepoManager::clearDisconnected(const QString &name)
     m_repos[i].state = (prior == RepoState::Active || prior == RepoState::Background)
         ? prior : RepoState::Background;
     emit repositoryStateChanged(name, m_repos.at(i).state);
-    emit notification(name, tr("连接已恢复。"));
+    emit notification(name, I18n::translate("连接已恢复。"));
 }
 
 void RepoManager::setConfig(const GlobalConfig &config)

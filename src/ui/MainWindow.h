@@ -10,6 +10,7 @@
 #include <memory>
 
 class QLabel;
+class QMenu;
 class QSystemTrayIcon;
 class RepoListPanel;
 class RepoDetailPage;
@@ -46,6 +47,7 @@ private:
     void quitApplication();
     void setupTrayIcon();
     void closeEvent(QCloseEvent *event) override;
+    void retranslateUi();
     void showNotification(const QString &name, const QString &message);
     void logToRepo(const QString &name, const QString &message);
     void onConflictDetected(const QString &name, const QStringList &paths,
@@ -63,5 +65,7 @@ private:
     QHash<QString, RepoDetailPage *> m_pagesByRepo;
     QLabel *m_statusText = nullptr;
     QSystemTrayIcon *m_trayIcon = nullptr;
+    QAction *m_trayShowAction = nullptr;
+    QAction *m_trayQuitAction = nullptr;
     QString m_selectedName;
 };

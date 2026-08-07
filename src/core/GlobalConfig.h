@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QString>
+
 namespace svnsync {
 
 /**
@@ -53,6 +55,9 @@ struct GlobalConfig
      *  0=Base 1=TheirsFull 2=MineFull 3=TheirsConflict 4=MineConflict
      *  5=Merged (same codes as CommandItem::conflictChoice). */
     int conflictResolution = 2;   // MineFull
+
+    /** UI language code: "zh_CN" (default) or "en". */
+    QString language = QStringLiteral("zh_CN");
 };
 
 } // namespace svnsync

@@ -1,5 +1,7 @@
 #include "core/RepoWatcher.h"
 
+#include "core/I18n.h"
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -121,7 +123,7 @@ void RepoWatcher::run()
                                   FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
                                   nullptr);
         if (hDir == INVALID_HANDLE_VALUE) {
-            emit failed(QStringLiteral("无法打开监听目录: %1").arg(m_watchPath));
+            emit failed(I18n::translate("无法打开监听目录: %1").arg(m_watchPath));
             for (int i = 0; i < 15 && !m_stopRequested.load(); ++i)
                 Sleep(200);
             continue;
@@ -167,13 +169,13 @@ void RepoWatcher::run()
                 continue;
             }
             if (wait != WAIT_OBJECT_0) {
-                emit failed(QStringLiteral("文件监听中断，正在重连…"));
+                emit failed(I18n::translate("文件监听中断，正在重连…"));
                 break;
             }
 
             DWORD bytes = 0;
             if (!GetOverlappedResult(hDir, &overlapped, &bytes, FALSE) || bytes == 0) {
-                emit failed(QStringLiteral("读取文件变化失败，正在重连…"));
+                emit failed(I18n::translate("读取文件变化失败，正在重连…"));
                 break;
             }
 
@@ -194,7 +196,7 @@ void RepoWatcher::run()
             }
 
             if (!issueRead()) {
-                emit failed(QStringLiteral("重新监听失败，正在重连…"));
+                emit failed(I18n::translate("重新监听失败，正在重连…"));
                 break;
             }
             collectAndMaybeEmit();

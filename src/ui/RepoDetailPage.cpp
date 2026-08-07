@@ -1,5 +1,6 @@
 #include "ui/RepoDetailPage.h"
 
+#include "core/I18n.h"
 #include "core/SyncEngine.h"
 #include "ui/FileBrowser.h"
 
@@ -16,11 +17,11 @@ namespace {
 QString stateText(svnsync::RepoState state)
 {
     switch (state) {
-    case svnsync::RepoState::Active: return QStringLiteral("● 同步中");
-    case svnsync::RepoState::Background: return QStringLiteral("◐ 后台同步");
-    case svnsync::RepoState::Deactive: return QStringLiteral("○ 停止监控");
-    case svnsync::RepoState::AuthFailed: return QStringLiteral("✕ 认证失败");
-    case svnsync::RepoState::Disconnected: return QStringLiteral("✖ 断开链接");
+    case svnsync::RepoState::Active: return I18n::translate("● 同步中");
+    case svnsync::RepoState::Background: return I18n::translate("◐ 后台同步");
+    case svnsync::RepoState::Deactive: return I18n::translate("○ 停止监控");
+    case svnsync::RepoState::AuthFailed: return I18n::translate("✕ 认证失败");
+    case svnsync::RepoState::Disconnected: return I18n::translate("✖ 断开链接");
     }
     return QString();
 }
@@ -64,25 +65,25 @@ RepoDetailPage::RepoDetailPage(QWidget *parent)
     titleRow->addSpacing(12);
     titleRow->addWidget(m_stateLabel);
     titleRow->addStretch(1);
-    auto *configureButton = new QPushButton(QStringLiteral("⚙ 仓库配置"), header);
-    auto *removeButton = new QPushButton(QStringLiteral("🗑 移除仓库"), header);
-    titleRow->addWidget(configureButton);
-    titleRow->addWidget(removeButton);
+    m_configureButton = new QPushButton(I18n::translate("⚙ 仓库配置"), header);
+    m_removeButton = new QPushButton(I18n::translate("🗑 移除仓库"), header);
+    titleRow->addWidget(m_configureButton);
+    titleRow->addWidget(m_removeButton);
     headLayout->addLayout(titleRow);
 
     layout->addWidget(header);
 
-    auto *tabs = new QTabWidget(this);
-    m_browser = new FileBrowser(tabs);
-    m_log = new QPlainTextEdit(tabs);
+    m_tabs = new QTabWidget(this);
+    m_browser = new FileBrowser(m_tabs);
+    m_log = new QPlainTextEdit(m_tabs);
     m_log->setReadOnly(true);
     m_log->setMaximumBlockCount(20000);
-    tabs->addTab(m_browser, QStringLiteral("文件"));
-    tabs->addTab(m_log, QStringLiteral("日志"));
-    layout->addWidget(tabs, 1);
+    m_tabs->addTab(m_browser, I18n::translate("文件"));
+    m_tabs->addTab(m_log, I18n::translate("日志"));
+    layout->addWidget(m_tabs, 1);
 
-    connect(configureButton, &QPushButton::clicked, this, &RepoDetailPage::configureRequested);
-    connect(removeButton, &QPushButton::clicked, this, &RepoDetailPage::removeRequested);
+    connect(m_configureButton, &QPushButton::clicked, this, &RepoDetailPage::configureRequested);
+    connect(m_removeButton, &QPushButton::clicked, this, &RepoDetailPage::removeRequested);
     connect(m_browser, &FileBrowser::syncRequested,
             this, &RepoDetailPage::syncRequested);
     connect(m_browser, &FileBrowser::conflictScanRequested,
@@ -130,4 +131,14 @@ void RepoDetailPage::setLogHistory(const QStringList &lines)
 void RepoDetailPage::refreshFiles()
 {
     m_browser->refresh();
+}
+
+void RepoDetailPage::retranslate()
+{
+    m_configureButton->setText(I18n::translate("⚙ 仓库配置"));
+    m_removeButton->setText(I18n::translate("🗑 移除仓库"));
+    m_tabs->setTabText(0, I18n::translate("文件"));
+    m_tabs->setTabText(1, I18n::translate("日志"));
+    setState(m_state);
+    m_browser->retranslate();
 }

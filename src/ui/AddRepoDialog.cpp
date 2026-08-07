@@ -1,5 +1,6 @@
 #include "ui/AddRepoDialog.h"
 
+#include "core/I18n.h"
 #include "core/SvnCommand.h"
 #include "core/SvnWorker.h"
 
@@ -21,7 +22,7 @@ AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
     , m_configure(configure)
     , m_worker(std::make_unique<svnsync::SvnWorker>(this))
 {
-    setWindowTitle(configure ? QStringLiteral("仓库配置") : QStringLiteral("添加仓库"));
+    setWindowTitle(configure ? I18n::translate("仓库配置") : I18n::translate("添加仓库"));
     setMinimumWidth(480);
 
     auto *layout = new QVBoxLayout(this);
@@ -31,9 +32,9 @@ AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
     m_path = new QLineEdit(this);
     // Freely editable in add mode; locked in configure mode.
     m_path->setReadOnly(m_configure);
-    m_path->setPlaceholderText(QStringLiteral("本地工作副本路径（不存在则自动创建）"));
+    m_path->setPlaceholderText(I18n::translate("本地工作副本路径（不存在则自动创建）"));
     m_url = new QLineEdit(this);
-    m_url->setPlaceholderText(QStringLiteral("仓库 URL，例如 https://svn.example.com/repo/project"));
+    m_url->setPlaceholderText(I18n::translate("仓库 URL，例如 https://svn.example.com/repo/project"));
     m_username = new QLineEdit(this);
     m_password = new QLineEdit(this);
     m_password->setEchoMode(QLineEdit::Password);
@@ -41,32 +42,32 @@ AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
     // Path row: read-only field with the browse button right after it.
     auto *pathRow = new QHBoxLayout;
     pathRow->setSpacing(6);
-    auto *browse = new QPushButton(QStringLiteral("浏览…"), this);
+    auto *browse = new QPushButton(I18n::translate("浏览…"), this);
     pathRow->addWidget(m_path, 1);
     pathRow->addWidget(browse);
     if (m_configure)
         browse->setVisible(false);
 
-    form->addRow(QStringLiteral("名称"), m_name);
-    form->addRow(QStringLiteral("路径"), pathRow);
-    form->addRow(QStringLiteral("URL"), m_url);
-    form->addRow(QStringLiteral("用户名"), m_username);
-    form->addRow(QStringLiteral("密码"), m_password);
+    form->addRow(I18n::translate("名称"), m_name);
+    form->addRow(I18n::translate("路径"), pathRow);
+    form->addRow(I18n::translate("URL"), m_url);
+    form->addRow(I18n::translate("用户名"), m_username);
+    form->addRow(I18n::translate("密码"), m_password);
     layout->addLayout(form);
 
     if (!m_configure) {
-        m_enabled = new QCheckBox(QStringLiteral("添加后立即启用同步"), this);
+        m_enabled = new QCheckBox(I18n::translate("添加后立即启用同步"), this);
         m_enabled->setChecked(true);
         layout->addWidget(m_enabled);
     }
 
     auto *credHint = new QLabel(
-        QStringLiteral("凭据会交给 libsvn 加密存储，不会保存到应用配置中。"), this);
+        I18n::translate("凭据会交给 libsvn 加密存储，不会保存到应用配置中。"), this);
     credHint->setStyleSheet(QStringLiteral("color: #888;"));
     layout->addWidget(credHint);
 
     auto *testRow = new QHBoxLayout;
-    m_testButton = new QPushButton(QStringLiteral("测试连接"), this);
+    m_testButton = new QPushButton(I18n::translate("测试连接"), this);
     m_testResult = new QLabel(this);
     m_testResult->setWordWrap(true);
     testRow->addWidget(m_testButton);
@@ -74,9 +75,9 @@ AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
     layout->addLayout(testRow);
 
     auto *buttons = new QHBoxLayout;
-    auto *cancel = new QPushButton(QStringLiteral("取消"), this);
+    auto *cancel = new QPushButton(I18n::translate("取消"), this);
     m_okButton = new QPushButton(
-        configure ? QStringLiteral("更新") : QStringLiteral("添加"), this);
+        configure ? I18n::translate("更新") : I18n::translate("添加"), this);
     m_okButton->setDefault(true);
     m_okButton->setEnabled(false);
     buttons->addStretch(1);
@@ -154,7 +155,7 @@ void AddRepoDialog::setRepository(const svnsync::Repository &repo)
 void AddRepoDialog::choosePath()
 {
     const QString dir = QFileDialog::getExistingDirectory(
-        this, QStringLiteral("选择工作副本目录"),
+        this, I18n::translate("选择工作副本目录"),
         m_path->text().isEmpty() ? QDir::homePath() : m_path->text());
     if (!dir.isEmpty()) {
         m_pathCustomized = true;
@@ -169,12 +170,12 @@ void AddRepoDialog::testConnection(bool validate)
     m_validateOnSuccess = validate;
     const QString url = m_url->text().trimmed();
     if (url.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("缺少 URL"),
-                             QStringLiteral("请输入仓库 URL 后再测试连接。"));
+        QMessageBox::warning(this, I18n::translate("缺少 URL"),
+                             I18n::translate("请输入仓库 URL 后再测试连接。"));
         return;
     }
     m_testButton->setEnabled(false);
-    m_testButton->setText(QStringLiteral("测试中…"));
+    m_testButton->setText(I18n::translate("测试中…"));
     m_okButton->setEnabled(false);
     m_testResult->clear();
 
@@ -199,9 +200,9 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
             accept();
         } else {
             m_testButton->setEnabled(true);
-            m_testButton->setText(QStringLiteral("测试连接"));
+            m_testButton->setText(I18n::translate("测试连接"));
             m_testResult->setText(
-                QStringLiteral("创建工作副本失败：%1").arg(result.error));
+                I18n::translate("创建工作副本失败：%1").arg(result.error));
             m_testResult->setStyleSheet(QStringLiteral("color: #C62828;"));
             m_okButton->setEnabled(!m_name->text().trimmed().isEmpty());
             if (m_okButton->isEnabled())
@@ -211,7 +212,7 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
     }
 
     m_testButton->setEnabled(true);
-    m_testButton->setText(QStringLiteral("测试连接"));
+    m_testButton->setText(I18n::translate("测试连接"));
 
     if (m_configure) {
         if (result.success) {
@@ -223,8 +224,8 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
                 // "测试连接": report success but keep the dialog open.
                 m_testResult->setText(
                     result.revision > 0
-                        ? QStringLiteral("连接成功（HEAD 版本 r%1）").arg(result.revision)
-                        : QStringLiteral("连接成功"));
+                        ? I18n::translate("连接成功（HEAD 版本 r%1）").arg(result.revision)
+                        : I18n::translate("连接成功"));
                 m_testResult->setStyleSheet(QStringLiteral("color: #009A3E;"));
                 m_okButton->setEnabled(!m_password->text().isEmpty());
                 if (m_okButton->isEnabled())
@@ -232,7 +233,7 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
             }
         } else {
             m_testResult->setText(
-                QStringLiteral("用户名或密码不正确：%1").arg(result.error));
+                I18n::translate("用户名或密码不正确：%1").arg(result.error));
             m_testResult->setStyleSheet(QStringLiteral("color: #C62828;"));
             m_okButton->setEnabled(!m_password->text().isEmpty());
             if (m_okButton->isEnabled())
@@ -253,11 +254,11 @@ void AddRepoDialog::onTestResult(quint64 id, const svnsync::CommandResult &resul
         }
         m_testResult->setText(
             result.revision > 0
-                ? QStringLiteral("连接成功（HEAD 版本 r%1）").arg(result.revision)
-                : QStringLiteral("连接成功"));
+                ? I18n::translate("连接成功（HEAD 版本 r%1）").arg(result.revision)
+                : I18n::translate("连接成功"));
         m_testResult->setStyleSheet(QStringLiteral("color: #009A3E;"));
     } else {
-        m_testResult->setText(QStringLiteral("连接失败：%1").arg(result.error));
+        m_testResult->setText(I18n::translate("连接失败：%1").arg(result.error));
         m_testResult->setStyleSheet(QStringLiteral("color: #C62828;"));
     }
 }
@@ -272,19 +273,19 @@ void AddRepoDialog::validate()
     }
 
     if (m_name->text().trimmed().isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("缺少名称"), QStringLiteral("请输入仓库名称。"));
+        QMessageBox::warning(this, I18n::translate("缺少名称"), I18n::translate("请输入仓库名称。"));
         return;
     }
     const QString path = QDir::fromNativeSeparators(m_path->text().trimmed());
     if (path.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("缺少路径"),
-                             QStringLiteral("请输入工作副本路径。"));
+        QMessageBox::warning(this, I18n::translate("缺少路径"),
+                             I18n::translate("请输入工作副本路径。"));
         return;
     }
     const QFileInfo fi(path);
     if (fi.exists() && fi.isFile()) {
-        QMessageBox::warning(this, QStringLiteral("路径无效"),
-                             QStringLiteral("所选路径指向一个文件，请选择目录。"));
+        QMessageBox::warning(this, I18n::translate("路径无效"),
+                             I18n::translate("所选路径指向一个文件，请选择目录。"));
         return;
     }
 
@@ -295,8 +296,8 @@ void AddRepoDialog::validate()
     bool needsCheckout = false;
     if (!dir.exists()) {
         if (!QDir().mkpath(path)) {
-            QMessageBox::warning(this, QStringLiteral("路径无效"),
-                                 QStringLiteral("无法创建工作副本目录，请更换路径后重试。"));
+            QMessageBox::warning(this, I18n::translate("路径无效"),
+                                 I18n::translate("无法创建工作副本目录，请更换路径后重试。"));
             return;
         }
         needsCheckout = true;
@@ -306,8 +307,8 @@ void AddRepoDialog::validate()
         if (!entries.isEmpty()) {
             if (!dir.exists(QLatin1String(".svn"))) {
                 QMessageBox::warning(
-                    this, QStringLiteral("目录不为空"),
-                    QStringLiteral("所选目录不为空且不是工作副本，请选择空目录或更换路径。"));
+                    this, I18n::translate("目录不为空"),
+                    I18n::translate("所选目录不为空且不是工作副本，请选择空目录或更换路径。"));
                 return;
             }
             // Existing working copy: attach without checkout.
@@ -330,14 +331,14 @@ void AddRepoDialog::startCheckout(const QString &path)
 {
     const QString url = m_url->text().trimmed();
     if (url.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("缺少 URL"),
-                             QStringLiteral("请输入仓库 URL 后再添加。"));
+        QMessageBox::warning(this, I18n::translate("缺少 URL"),
+                             I18n::translate("请输入仓库 URL 后再添加。"));
         return;
     }
     m_checkoutPending = true;
     m_okButton->setEnabled(false);
     m_testButton->setEnabled(false);
-    m_testResult->setText(QStringLiteral("正在创建工作副本…"));
+    m_testResult->setText(I18n::translate("正在创建工作副本…"));
     m_testResult->setStyleSheet(QStringLiteral("color: #666;"));
 
     svnsync::CommandItem item;
