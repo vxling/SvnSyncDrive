@@ -50,6 +50,14 @@ enum class Category {
 Category categoryOf(Command command);
 
 /**
+ * True if the given error text reports a locked working copy (svn messages
+ * like "Working copy '...' locked." / "'...' is already locked."). Used by
+ * the runner to trigger an automatic `svn cleanup` + one retry before an
+ * update/commit is reported as failed.
+ */
+bool isWcLockErrorText(const QString &errorText);
+
+/**
  * Localized SVN status depth, mirroring libsvnplus SvnDepth (core stays
  * libsvnplus-free). Default for Status is Infinity (whole tree); a file
  * browser only needs Immediates to render a directory's direct children.

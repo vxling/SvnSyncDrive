@@ -175,6 +175,22 @@ static bool testCategoryOf()
     return true;
 }
 
+static bool testWcLockErrorText()
+{
+    std::printf("-- isWcLockErrorText --\n");
+    check(isWcLockErrorText(QStringLiteral("Working copy '/a' locked.: '/a' is already locked.")),
+          "interrupted-update message detected");
+    check(isWcLockErrorText(QStringLiteral("'/a' is already locked.")),
+          "bare 'is already locked' detected");
+    check(isWcLockErrorText(QStringLiteral("working copy locked")),
+          "lowercase 'working copy locked' detected");
+    check(!isWcLockErrorText(QStringLiteral("E155000: Runtime Error")),
+          "unrelated error ignored");
+    check(!isWcLockErrorText(QStringLiteral("svn: E170013: Connection reset")),
+          "network error ignored");
+    return true;
+}
+
 static bool testWorkerOrdering()
 {
     std::printf("-- SvnWorker ordering --\n");
@@ -1218,6 +1234,7 @@ int main(int argc, char *argv[])
     QCoreApplication app(argc, argv);
 
     testCategoryOf();
+    testWcLockErrorText();
     testWorkerOrdering();
     testWorkerDedup();
     testWorkerDedupBypass();

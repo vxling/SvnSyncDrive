@@ -2,6 +2,14 @@
 
 namespace svnsync {
 
+bool isWcLockErrorText(const QString &errorText)
+{
+    if (errorText.contains(QLatin1String("is already locked")))
+        return true;
+    return errorText.contains(QLatin1String("Working copy"), Qt::CaseInsensitive)
+        && errorText.contains(QLatin1String("locked"), Qt::CaseInsensitive);
+}
+
 Category categoryOf(Command command)
 {
     switch (command) {

@@ -5,6 +5,11 @@
 
 #include <svnplus/SvnClient.h>
 
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
+
 namespace svnsync {
 
 namespace {
@@ -88,8 +93,12 @@ public:
         case Command::BreakLock:
             result = makeResult(item, false, QStringLiteral("BreakLock is not supported"));
             break;
-        case Command::Commit: runCommit(item, result); break;
-        case Command::Update: runUpdate(item, result); break;
+        case Command::Commit:
+            runHeavyWithLockHeal(item, result, &SvnCommandRunner::runCommit);
+            break;
+        case Command::Update:
+            runHeavyWithLockHeal(item, result, &SvnCommandRunner::runUpdate);
+            break;
         case Command::Checkout: runCheckout(item, result); break;
         }
         return result;
@@ -120,6 +129,79 @@ private:
     static CommandResult fail(const CommandItem &item, const SvnPlus::SvnError &err)
     {
         return makeResult(item, false, errorText(err));
+    }
+
+    /** Working-copy root for a path: the nearest ancestor holding .svn/wc.db. */
+    static QString wcRootFor(const QString &path)
+    {
+        QString cur = QDir::cleanPath(path);
+        while (true) {
+            if (QFile::exists(cur + QLatin1String("/.svn/wc.db")))
+                return cur;
+            const QString parent = QFileInfo(cur).absolutePath();
+            if (parent == cur)
+                return QString();
+            cur = parent;
+        }
+    }
+
+    /** Cheap lock probe: is the working copy root (or its children) locked?
+     *  Best effort — on failure returns false and the retry path takes over.
+     *  Cached for a few seconds so a commit burst does not rescan each time. */
+    bool wcRootLocked(const QString &wcRoot)
+    {
+        if (wcRoot.isEmpty())
+            return false;
+        if (m_hasLockProbe && m_lastLockRoot == wcRoot && m_lastLockElapsed.elapsed() < 5000)
+            return m_lastLocked;
+        bool locked = false;
+        std::vector<SvnPlus::SvnStatus> statuses;
+        SvnPlus::SvnStatusOptions opts;
+        opts.depth = SvnPlus::SvnDepth::Immediates;
+        const SvnPlus::SvnError err = m_client.status(wcRoot.toStdString(), statuses, opts);
+        if (err.ok()) {
+            for (const auto &s : statuses) {
+                if (s.wcIsLocked) {
+                    locked = true;
+                    break;
+                }
+            }
+        }
+        m_lastLockRoot = wcRoot;
+        m_lastLockElapsed.start();
+        m_hasLockProbe = true;
+        m_lastLocked = locked;
+        return locked;
+    }
+
+    void runCleanup(const QString &path)
+    {
+        const SvnPlus::SvnError err = m_client.cleanup(path.toStdString());
+        if (err.ok())
+            AppLog::warn(QStringLiteral("working copy cleanup ok: %1").arg(path));
+        else
+            AppLog::warn(QStringLiteral("working copy cleanup failed: %1 (%2)").arg(path, errorText(err)));
+    }
+
+    using OpFn = void (SvnCommandRunner::*)(const CommandItem &, CommandResult &);
+
+    /** Runs a heavy write (commit/update) after clearing any leftover working
+     *  copy lock, and retries once if it still fails with a lock error. */
+    void runHeavyWithLockHeal(const CommandItem &item, CommandResult &result, OpFn op)
+    {
+        const QString wcRoot = wcRootFor(item.path);
+        if (wcRootLocked(wcRoot)) {
+            AppLog::warn(QStringLiteral("working copy is locked; cleanup before %1: %2")
+                             .arg(commandName(item.command), wcRoot));
+            runCleanup(wcRoot);
+        }
+        (this->*op)(item, result);
+        if (!result.success && isWcLockErrorText(result.error) && !wcRoot.isEmpty()) {
+            AppLog::warn(QStringLiteral("%1 failed with a working-copy lock; cleanup and retry: %2")
+                             .arg(commandName(item.command), item.path));
+            runCleanup(wcRoot);
+            (this->*op)(item, result);
+        }
     }
 
     void runStatus(const CommandItem &item, CommandResult &result)
@@ -398,6 +480,11 @@ private:
     }
 
     SvnPlus::SvnClient m_client;
+
+    QString m_lastLockRoot;
+    QElapsedTimer m_lastLockElapsed;
+    bool m_hasLockProbe = false;
+    bool m_lastLocked = false;
 };
 
 } // namespace
