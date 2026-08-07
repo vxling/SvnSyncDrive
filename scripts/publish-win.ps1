@@ -13,7 +13,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Version = "0.4.0",
+    [string]$Version = "0.5.0",
     [string]$QtRoot = "C:\Users\xuser\Qt\6.11.1\msvc2022_64",
     [string]$LibSvnPlusRoot = "C:\Users\xuser\Documents\LibSVNPlus\build\_stage",
     [string]$WixRoot = "C:\Users\xuser\Tools\WiX314\tools",
