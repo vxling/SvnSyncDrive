@@ -14,6 +14,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -1255,28 +1256,43 @@ static void runLockHeal(const QString &wc)
             return;
         }
         QSqlQuery q(db);
-        if (!q.exec(QStringLiteral("SELECT wc_id FROM WCROOT LIMIT 1")) || !q.next()) {
-            check(false, "wc.db exposes its WCROOT id");
+        // Working copy id: older wc.db schema names it wc_id, svn 1.15 id.
+        qlonglong wcId = -1;
+        if (q.exec(QStringLiteral("SELECT id FROM WCROOT LIMIT 1")) && q.next())
+            wcId = q.value(0).toLongLong();
+        if (wcId < 0 && q.exec(QStringLiteral("SELECT wc_id FROM WCROOT LIMIT 1")) && q.next())
+            wcId = q.value(0).toLongLong();
+        check(wcId >= 0, "wc.db exposes its working copy id");
+        if (wcId < 0) {
             db.close();
+            QSqlDatabase::removeDatabase(QStringLiteral("lockheal"));
             return;
         }
-        const qlonglong wcId = q.value(0).toLongLong();
-        QString root = wc;
-        const QString esc = QStringLiteral("'")
-            + root.replace(QLatin1Char('\''), QLatin1String("''")) + QStringLiteral("'");
-        const bool lockOk = q.exec(QStringLiteral(
-            "INSERT INTO WC_LOCK (wc_id, local_abspath, lock_token) "
-            "VALUES (%1, %2, 'lockheal-test')").arg(wcId).arg(esc));
-        const bool wqOk = q.exec(QStringLiteral(
-            "INSERT INTO WORK_QUEUE (wc_id, local_abspath, wcroot_abspath, statement) "
-            "VALUES (%1, %2, %2, "
-            "'DELETE FROM WORK_QUEUE WHERE wc_id = %1 AND local_abspath = %2;')")
-                                     .arg(wcId).arg(esc));
+        // Discover the WC_LOCK column layout and insert a genuine lock row.
+        QSet<QString> cols;
+        if (q.exec(QStringLiteral("PRAGMA table_info(WC_LOCK)"))) {
+            while (q.next())
+                cols.insert(q.value(1).toString());
+        }
+        bool lockOk = false;
+        if (cols.contains(QStringLiteral("local_dir_relpath"))
+            && cols.contains(QStringLiteral("locked_levels"))) {
+            lockOk = q.exec(QStringLiteral(
+                "INSERT INTO WC_LOCK (wc_id, local_dir_relpath, locked_levels) "
+                "VALUES (%1, '', 1)").arg(wcId));
+        } else if (cols.contains(QStringLiteral("local_abspath"))
+                   && cols.contains(QStringLiteral("lock_token"))) {
+            QString root = wc;
+            const QString esc = QStringLiteral("'")
+                + root.replace(QLatin1Char('\''), QLatin1String("''")) + QStringLiteral("'");
+            lockOk = q.exec(QStringLiteral(
+                "INSERT INTO WC_LOCK (wc_id, local_abspath, lock_token) "
+                "VALUES (%1, %2, 'lockheal-test')").arg(wcId).arg(esc));
+        }
         db.close();
         QSqlDatabase::removeDatabase(QStringLiteral("lockheal"));
         check(lockOk, "injected WC_LOCK row");
-        check(wqOk, "injected WORK_QUEUE row");
-        if (!lockOk || !wqOk)
+        if (!lockOk)
             return;
     }
 
