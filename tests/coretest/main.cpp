@@ -1247,6 +1247,7 @@ static void runLockHeal(const QString &wc)
     }
     check(true, "working copy has a .svn/wc.db");
 
+    bool lockOk = false;
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
                                                     QStringLiteral("lockheal"));
@@ -1255,7 +1256,6 @@ static void runLockHeal(const QString &wc)
             check(false, "wc.db opens");
             return;
         }
-        bool lockOk = false;
         {
             QSqlQuery q(db);
             // Working copy id: older wc.db schema names it wc_id, svn 1.15 id.
@@ -1265,11 +1265,8 @@ static void runLockHeal(const QString &wc)
             if (wcId < 0 && q.exec(QStringLiteral("SELECT wc_id FROM WCROOT LIMIT 1")) && q.next())
                 wcId = q.value(0).toLongLong();
             check(wcId >= 0, "wc.db exposes its working copy id");
-            if (wcId < 0) {
-                db.close();
-                QSqlDatabase::removeDatabase(QStringLiteral("lockheal"));
+            if (wcId < 0)
                 return;
-            }
             // Discover the WC_LOCK column layout and insert a genuine lock row.
             QSet<QString> cols;
             if (q.exec(QStringLiteral("PRAGMA table_info(WC_LOCK)"))) {
@@ -1292,11 +1289,11 @@ static void runLockHeal(const QString &wc)
             }
         }
         db.close();
-        QSqlDatabase::removeDatabase(QStringLiteral("lockheal"));
-        check(lockOk, "injected WC_LOCK row");
-        if (!lockOk)
-            return;
     }
+    QSqlDatabase::removeDatabase(QStringLiteral("lockheal"));
+    check(lockOk, "injected WC_LOCK row");
+    if (!lockOk)
+        return;
 
     {
         SvnPlus::SvnClient client;
