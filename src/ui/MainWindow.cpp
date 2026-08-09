@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 
+#include "core/AppLog.h"
 #include "core/I18n.h"
 #include "core/LogStore.h"
 #include "core/QuickAccess.h"
@@ -97,11 +98,15 @@ MainWindow::MainWindow(QWidget *parent)
     m_manager->load();
     rebuildSidebar();
 
-    // Ensure the file-manager shortcut exists if behaviour is enabled; this
-    // is idempotent and also fixes up the entry after reinstalling or after
-    // the storage root moved while the app was closed.
-    if (m_manager->config().quickAccessEnabled)
-        svnsync::QuickAccess::install(m_manager->config().repoRoot);
+    // The file-manager shortcut is reconciled on every startup when the
+    // setting is enabled: install() creates the storage folder if it is
+    // missing and re-registers/re-points the shell entry, so a lost or
+    // broken shortcut (e.g. after the exe or the folder moved) is repaired
+    // automatically. Never removes it here — uninstalling is user-driven.
+    if (m_manager->config().quickAccessEnabled) {
+        if (!svnsync::QuickAccess::install(m_manager->config().repoRoot))
+            svnsync::AppLog::warn("quick-access shortcut repair failed");
+    }
 
     setupTrayIcon();
 

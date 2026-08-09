@@ -73,8 +73,9 @@ struct GlobalConfig
     /** Show a shortcut to the repository storage folder in the file manager
      *  (This PC + Quick Access on Windows, Nautilus/GTK bookmarks on Linux).
      *  The entry only ever points at repoRoot; changing repoRoot re-points
-     *  it and toggling this off removes it. */
-    bool quickAccessEnabled = false;
+     *  it and toggling this off removes it. On by default; the entry is
+     *  reconciled automatically at every startup when this is set. */
+    bool quickAccessEnabled = true;
 };
 
 } // namespace svnsync

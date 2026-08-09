@@ -1027,7 +1027,7 @@ static bool testGlobalConfigRoundtrip()
     check(defaults.language == QStringLiteral("zh_CN"), "default language is Chinese");
     check(defaults.repoRoot.endsWith(QStringLiteral("/SvnSyncDrive")),
           "default repo root is ~/SvnSyncDrive");
-    check(!defaults.quickAccessEnabled, "default quick access off");
+    check(defaults.quickAccessEnabled, "default quick access on");
 
     // Custom values survive a save + load (and a re-open of the file).
     GlobalConfig custom;

@@ -381,18 +381,18 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     QAction *copyPathAction = nullptr;
 
     if (info.isDir()) {
-        openAction = menu.addAction(I18n::translate("打开目录"));
+        openAction = menu.addAction(QStringLiteral("📂 ") + I18n::translate("打开目录"));
     } else {
-        openAction = menu.addAction(I18n::translate("打开"));
+        openAction = menu.addAction(QStringLiteral("📄 ") + I18n::translate("打开"));
     }
-    newFolderAction = menu.addAction(I18n::translate("新建文件夹"));
-    newTextFileAction = menu.addAction(I18n::translate("新建文本文件"));
+    newFolderAction = menu.addAction(QStringLiteral("📁 ") + I18n::translate("新建文件夹"));
+    newTextFileAction = menu.addAction(QStringLiteral("📝 ") + I18n::translate("新建文本文件"));
     menu.addSeparator();
-    copyPathAction = menu.addAction(I18n::translate("复制完整路径"));
+    copyPathAction = menu.addAction(QStringLiteral("📋 ") + I18n::translate("复制完整路径"));
     menu.addSeparator();
 
     // All SVN operations live in one "advanced" submenu.
-    QMenu *advanced = menu.addMenu(I18n::translate("高级操作"));
+    QMenu *advanced = menu.addMenu(QStringLiteral("🧰 ") + I18n::translate("高级操作"));
     QAction *commitAction = nullptr;
     QAction *updateAction = nullptr;
     QAction *revertAction = nullptr;
@@ -404,14 +404,20 @@ void FileBrowser::showContextMenu(const QPoint &pos)
     const bool isUnversioned = kind == svnsync::StatusKind::Unversioned;
 
     if (isUnversioned) {
-        addAction = advanced->addAction(I18n::translate("添加到版本库 (Add)"));
+        addAction = advanced->addAction(
+            QStringLiteral("➕ ") + I18n::translate("添加到版本库 (Add)"));
     } else {
-        commitAction = advanced->addAction(I18n::translate("提交… (Commit)"));
-        updateAction = advanced->addAction(I18n::translate("更新 (Update)"));
-        revertAction = advanced->addAction(I18n::translate("还原 (Revert)"));
+        commitAction = advanced->addAction(
+            QStringLiteral("📤 ") + I18n::translate("提交… (Commit)"));
+        updateAction = advanced->addAction(
+            QStringLiteral("🔃 ") + I18n::translate("更新 (Update)"));
+        revertAction = advanced->addAction(
+            QStringLiteral("↩️ ") + I18n::translate("还原 (Revert)"));
     }
-    deleteAction = advanced->addAction(I18n::translate("从版本库删除 (Delete)"));
-    renameAction = advanced->addAction(I18n::translate("重命名… (Move)"));
+    deleteAction = advanced->addAction(
+        QStringLiteral("🗑 ") + I18n::translate("从版本库删除 (Delete)"));
+    renameAction = advanced->addAction(
+        QStringLiteral("✏️ ") + I18n::translate("重命名… (Move)"));
 
     for (QAction *a : { commitAction, updateAction, revertAction, addAction,
                         deleteAction, renameAction }) {
