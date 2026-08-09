@@ -40,7 +40,7 @@ constexpr int kStatusColumn = 4;
 void drawStatusBadge(QPainter *painter, const QRect &area, const QString &text,
                      const QColor &color)
 {
-    const int d = std::clamp(area.height() - 6, 14, 18);
+    const int d = std::clamp(area.height() - 12, 12, 15);
     const QRectF circle(area.center().x() - d / 2.0,
                         area.center().y() - d / 2.0, d, d);
     painter->save();
@@ -50,7 +50,7 @@ void drawStatusBadge(QPainter *painter, const QRect &area, const QString &text,
     painter->drawEllipse(circle);
     QFont font = painter->font();
     font.setBold(true);
-    font.setPixelSize(qMax(8, d - 8));  // one notch smaller than the circle
+    font.setPixelSize(qMax(8, d - 4));
     painter->setFont(font);
     painter->setPen(QColor(Qt::white));
     painter->drawText(circle, Qt::AlignCenter, text);
