@@ -10,6 +10,12 @@ SvnSyncDrive is a cross-platform desktop client that keeps local folders in **tw
 
 Built with C++17 + Qt 6 (Widgets), on top of [LibSVNPlus](https://github.com/vxling/LibSVNPlus), a thin C++ wrapper around the Subversion C API.
 
+## 截图 / Screenshots
+
+![主界面 Main window](docs/screenshots/screenshot-main.png)
+
+![文件浏览器与状态徽标 File browser with status badges](docs/screenshots/screenshot-files.png)
+
 ## 功能 / Features
 
 - **向上同步（本地 → 服务器）**：监听工作副本，对未纳入版本控制的文件自动执行 `svn add`，并按目录（最深优先）批量提交版本控制的修改。  
