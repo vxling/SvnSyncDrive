@@ -205,6 +205,6 @@ Also try `SvnSyncDrive --repo <wc> <url> [user] [pass]` for a single-repo headle
 
 ## 许可证 / License
 
-许可证尚未声明——本仓库尚无 `LICENSE` 文件。分发前请添加。
+本项目采用 **MIT License** 发布，版权归 vxling（© 2026）所有。详见 [LICENSE](LICENSE)。
 
-The license is not yet declared — no `LICENSE` file exists in this repository. Add one before distributing.
+Released under the [MIT License](LICENSE). Copyright (c) 2026 vxling.
