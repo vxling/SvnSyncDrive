@@ -232,14 +232,20 @@ void MainWindow::onSettingsRequested()
     m_manager->setConfig(config);
     I18n::setLanguage(config.language);
 
-    // File-manager shortcut: re-point when the storage root changed, remove
-    // when disabled, install when enabled (this is a no-op if already there).
-    if (config.quickAccessEnabled || oldConfig.repoRoot != config.repoRoot)
+    // File-manager shortcut: whenever the toggled state or the storage root
+    // changed, drop the old entry first, then (re)install when enabled. This
+    // also actually removes the shortcut when the checkbox is unchecked.
+    if (oldConfig.quickAccessEnabled != config.quickAccessEnabled
+        || oldConfig.repoRoot != config.repoRoot)
         svnsync::QuickAccess::uninstall(oldConfig.repoRoot);
-    if (config.quickAccessEnabled && !svnsync::QuickAccess::install(config.repoRoot))
-        setGlobalStatus(I18n::translate("设置已保存：文件管理器快捷入口安装失败（请检查权限）"));
-    else
+    if (config.quickAccessEnabled) {
+        if (!svnsync::QuickAccess::install(config.repoRoot))
+            setGlobalStatus(I18n::translate("设置已保存：文件管理器快捷入口安装失败（请检查权限）"));
+        else
+            setGlobalStatus(I18n::translate("设置已保存"));
+    } else {
         setGlobalStatus(I18n::translate("设置已保存"));
+    }
 }
 
 void MainWindow::setupTrayIcon()
@@ -283,8 +289,10 @@ void MainWindow::showWindowFromTray()
 
 void MainWindow::quitApplication()
 {
-    // Engines and their worker threads are torn down by RepoManager's
-    // destructor once the event loop exits.
+    // Stop engines (cancels in-flight svn commands and joins the worker
+    // threads) before the event loop ends, so quitting does not hang on a
+    // command that is stuck against an unreachable server.
+    m_manager->stopAll();
     qApp->quit();
 }
 

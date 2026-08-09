@@ -20,6 +20,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QRectF>
 #include <QPointer>
 #include <QPushButton>
 #include <QStyledItemDelegate>
@@ -30,6 +31,31 @@
 #include <algorithm>
 
 namespace {
+
+/** Status column index in the file table. */
+constexpr int kStatusColumn = 4;
+
+/** Draw a circular status badge: the status glyph in white on a colored
+ *  circle (the per-kind status color from statusColor()). */
+void drawStatusBadge(QPainter *painter, const QRect &area, const QString &text,
+                     const QColor &color)
+{
+    const int d = std::clamp(area.height() - 6, 14, 18);
+    const QRectF circle(area.center().x() - d / 2.0,
+                        area.center().y() - d / 2.0, d, d);
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(color);
+    painter->drawEllipse(circle);
+    QFont font = painter->font();
+    font.setBold(true);
+    font.setPixelSize(qMax(9, d - 6));
+    painter->setFont(font);
+    painter->setPen(QColor(Qt::white));
+    painter->drawText(circle, Qt::AlignCenter, text);
+    painter->restore();
+}
 
 QString statusLetter(svnsync::StatusKind kind)
 {
@@ -128,13 +154,26 @@ public:
             bg = opt.palette.base().color();
         painter->fillRect(opt.rect, bg);
 
-        QStyleOptionViewItem f = opt;
-        f.state &= ~(QStyle::State_Selected | QStyle::State_MouseOver);
-        f.state |= QStyle::State_Enabled;
         // Keep per-cell foreground colors (e.g. the green status glyph) even
         // while the row is selected; only plain cells fall back to
         // near-black text on selection.
         const QBrush itemBrush = index.data(Qt::ForegroundRole).value<QBrush>();
+
+        // Status column: circular colored badge with white glyph instead of
+        // a plain colored letter (empty cells such as the ".." parent row
+        // keep the plain background).
+        if (index.column() == kStatusColumn && !opt.text.isEmpty()) {
+            const QRect badgeArea = opt.rect.adjusted(0, 3, 0, -3);
+            drawStatusBadge(painter, badgeArea, opt.text,
+                            itemBrush.style() != Qt::NoBrush
+                                ? itemBrush.color()
+                                : QColor(0x80, 0x80, 0x80));
+            return;
+        }
+
+        QStyleOptionViewItem f = opt;
+        f.state &= ~(QStyle::State_Selected | QStyle::State_MouseOver);
+        f.state |= QStyle::State_Enabled;
         if (itemBrush.style() != Qt::NoBrush)
             f.palette.setBrush(QPalette::Text, itemBrush);
         else if (selected)

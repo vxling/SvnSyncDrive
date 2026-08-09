@@ -160,6 +160,12 @@ void RepoManager::syncNow(const QString &name)
         e->syncNow();
 }
 
+void RepoManager::stopAll()
+{
+    for (auto &entry : m_engines)
+        entry.second->stop();
+}
+
 void RepoManager::setCredentials(const QString &name, const QString &username,
                                  const QString &password)
 {

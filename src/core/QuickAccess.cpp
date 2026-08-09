@@ -1,5 +1,6 @@
 #include "core/QuickAccess.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -62,6 +63,16 @@ struct ComGuard {
 };
 
 // ── stable GUID per storage folder ─────────────────────────────────────────
+/** Icon reference for the shell folder: the app's own executable so the
+ *  This PC entry shows the program icon (icon index 0). */
+QString iconReference()
+{
+    const QString exe = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+    if (exe.isEmpty())
+        return QStringLiteral("%SystemRoot%\\System32\\imageres.dll,-111");
+    return exe + QStringLiteral(",0");
+}
+
 QString guidFor(const QString &root)
 {
     const QByteArray hash = QCryptographicHash::hash(
@@ -313,7 +324,7 @@ bool QuickAccess::install(const QString &root)
     ok &= regsetDword(cls, QStringLiteral("System.IsPinnedToNameSpaceTree"), 1);
     ok &= regsetDword(cls, QStringLiteral("SortOrderIndex"), 0x00000042);
     ok &= regsetSz(cls + QStringLiteral("\\DefaultIcon"), QString(),
-                   QStringLiteral("%SystemRoot%\\System32\\imageres.dll,-111"));
+                   iconReference());
     ok &= regsetSz(cls + QStringLiteral("\\InProcServer32"), QString(),
                    QStringLiteral("%SystemRoot%\\System32\\shell32.dll"));
     ok &= regsetSz(cls + QStringLiteral("\\Instance"), QStringLiteral("CLSID"),
@@ -337,6 +348,8 @@ bool QuickAccess::install(const QString &root)
 
     // Best-effort Quick Access pin; report it so the UI can mention it.
     pinToQuickAccess(native);
+    // Make Explorer pick up the new/interrupted-entry immediately.
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     return ok;
 #else
     const QString uri = QStringLiteral("file://") + root;
@@ -355,6 +368,7 @@ bool QuickAccess::uninstall(const QString &root)
     regDeleteTreeKey(QStringLiteral(
         "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\\") + guid);
     unpinFromQuickAccess(QDir::toNativeSeparators(root));
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     return true;
 #else
     const QString uri = QStringLiteral("file://") + root;

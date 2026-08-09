@@ -78,6 +78,11 @@ public:
     /** Request an immediate upward sync for one repository. */
     void syncNow(const QString &name);
 
+    /** Stop every engine (cancels in-flight commands and joins the worker
+     *  threads). Used on shutdown so quitting never blocks on a hung
+     *  network command. */
+    void stopAll();
+
     GlobalConfig config() const { return m_config; }
 
     /** Persist and apply new global settings to every running engine. */

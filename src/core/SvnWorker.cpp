@@ -518,10 +518,17 @@ void SvnWorker::start(RunnerFactory factory)
 
 void SvnWorker::stop()
 {
+    ICommandRunner *runner = nullptr;
     {
         std::lock_guard<std::mutex> lk(m_mutex);
         m_stopping = true;
+        runner = m_runner.get();
     }
+    // Cancel any in-flight command before joining: on an unreachable server a
+    // status -u/commit can otherwise block the join until the network timeout
+    // (e.g. 60 s), which makes quitting seem to hang.
+    if (runner)
+        runner->cancel();
     m_cv.notify_all();
     if (m_thread.joinable())
         m_thread.join();
@@ -591,7 +598,10 @@ void SvnWorker::setCommandTimeoutSec(int seconds)
 
 void SvnWorker::workerLoop()
 {
-    m_runner = m_factory();
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_runner = m_factory();
+    }
 
     while (true) {
         CommandItem item;
