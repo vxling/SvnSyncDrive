@@ -3,6 +3,7 @@
 #include "core/I18n.h"
 #include "core/ICommandRunner.h"
 #include "core/LogStore.h"
+#include "core/QuickAccess.h"
 #include "core/RepoManager.h"
 #include "core/RepoWatcher.h"
 #include "core/Repository.h"
@@ -921,6 +922,63 @@ static bool testSyncEngineClassify()
     return true;
 }
 
+static bool testSyncEngineFullSyncNotDropped()
+{
+    std::printf("-- SyncEngine deferred full sync under continuous poll load --\n");
+
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    Repository repo;
+    repo.name = QStringLiteral("fullsync");
+    repo.path = dir.path();
+    repo.url = QStringLiteral("svn://localhost/fullsync");
+    repo.state = RepoState::Active;
+
+    SyncEngine engine(repo);
+    auto *scripted = new ScriptedRunner;
+    engine.setCommandRunnerFactoryForTest(
+        [scripted]() -> std::unique_ptr<ICommandRunner> {
+            return std::unique_ptr<ICommandRunner>(scripted);
+        });
+
+    GlobalConfig cfg;
+    cfg.pollIntervalMs = 20;       // poll restart keeps the engine almost busy
+    cfg.fullSyncIntervalMs = 500;  // full-sync ticks land while polls run
+    engine.setConfig(cfg);
+
+    // GetHeadRevision is slow, so a poll occupies the engine long enough for
+    // full-sync ticks to arrive while it is busy. Everything else is instant.
+    std::atomic<int> updateCalls{ 0 };
+    scripted->handler = [&updateCalls](const CommandItem &item) {
+        if (item.command == Command::GetHeadRevision) {
+            QThread::msleep(150);
+            return makeResult(item, true);
+        }
+        if (item.command == Command::Update)
+            updateCalls.fetch_add(1);
+        return makeResult(item, true);
+    };
+
+    engine.start();
+
+    // Baseline: the startup fullSync performed an update.
+    check(waitUntil([&] { return updateCalls.load() >= 1; }, 10000),
+          "startup full sync performed an update");
+    const int before = updateCalls.load();
+
+    // The engine is almost always busy with polls here. Every full-sync tick
+    // must be deferred and then actually performed once the poll finishes,
+    // never silently dropped.
+    check(waitUntil([&] { return updateCalls.load() >= before + 2; }, 20000),
+          "full-sync deferred while busy is still performed afterwards");
+
+    engine.stop();
+    check(updateCalls.load() >= before + 2,
+          "full-sync rounds kept running under continuous poll load");
+    return true;
+}
+
 static bool testWorkerWatchdog()
 {
     std::printf("-- SvnWorker watchdog --\n");
@@ -967,6 +1025,9 @@ static bool testGlobalConfigRoundtrip()
     check(!defaults.autoResolveConflicts, "default auto-resolve off");
     check(defaults.conflictResolution == 2, "default conflict resolution is MineFull");
     check(defaults.language == QStringLiteral("zh_CN"), "default language is Chinese");
+    check(defaults.repoRoot.endsWith(QStringLiteral("/SvnSyncDrive")),
+          "default repo root is ~/SvnSyncDrive");
+    check(!defaults.quickAccessEnabled, "default quick access off");
 
     // Custom values survive a save + load (and a re-open of the file).
     GlobalConfig custom;
@@ -982,6 +1043,8 @@ static bool testGlobalConfigRoundtrip()
     custom.autoResolveConflicts = true;
     custom.conflictResolution = 1;
     custom.language = QStringLiteral("en");
+    custom.repoRoot = dir.path() + QStringLiteral("/MyRepos");
+    custom.quickAccessEnabled = true;
     ConfigStore::saveGlobalConfig(custom);
 
     GlobalConfig loaded = ConfigStore::loadGlobalConfig();
@@ -997,6 +1060,8 @@ static bool testGlobalConfigRoundtrip()
     check(loaded.autoResolveConflicts, "auto-resolve round-trips");
     check(loaded.conflictResolution == 1, "conflict resolution round-trips");
     check(loaded.language == QStringLiteral("en"), "language round-trips");
+    check(loaded.repoRoot == custom.repoRoot, "repo root round-trips");
+    check(loaded.quickAccessEnabled, "quick-access round-trips");
 
     // A reload from a fresh connection (app restart) sees the same values.
     ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
@@ -1006,6 +1071,44 @@ static bool testGlobalConfigRoundtrip()
           "values survive a restart (re-opened database)");
 
     ConfigStore::setDatabaseFileForTest(QString());
+    return true;
+}
+
+/** The GTK bookmarks file editor (used by the Linux quick-access shortcut)
+ *  is a pure file operation, so it is tested here on every platform. */
+static bool testQuickAccessBookmarks()
+{
+    std::printf("-- QuickAccess bookmark file --\n");
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return false;
+    const QString path = dir.path() + QStringLiteral("/bookmarks");
+    const QString uri = QStringLiteral("file:///home/user/SvnSyncDrive");
+
+    check(QuickAccess::editBookmarksFile(path, uri, QStringLiteral("SvnSyncDrive"), true),
+          "adding a bookmark creates the file");
+    QString content;
+    {
+        QFile f(path);
+        check(f.open(QIODevice::ReadOnly | QIODevice::Text), "bookmark file readable");
+        content = QString::fromUtf8(f.readAll());
+    }
+    check(content.contains(uri), "bookmark URI present");
+    check(content.contains(QStringLiteral("file:///home/user/SvnSyncDrive SvnSyncDrive")),
+          "bookmark uri + label written together");
+
+    // Adding again must not duplicate the entry.
+    check(QuickAccess::editBookmarksFile(path, uri, QStringLiteral("SvnSyncDrive"), true),
+          "re-adding a bookmark succeeds");
+    QFile f2(path);
+    f2.open(QIODevice::ReadOnly | QIODevice::Text);
+    const QString reAdd = QString::fromUtf8(f2.readAll());
+    f2.close();
+    check(reAdd.count(uri) == 1, "bookmark is not duplicated on re-add");
+
+    // Removing the entry leaves an empty file.
+    check(QuickAccess::editBookmarksFile(path, uri, QStringLiteral("SvnSyncDrive"), false),
+          "removing a bookmark succeeds");
     return true;
 }
 
@@ -1396,8 +1499,10 @@ int main(int argc, char *argv[])
     testSyncEngineResolveChoice();
     testSyncEngineAutoResolve();
     testSyncEngineClassify();
+    testSyncEngineFullSyncNotDropped();
     testWorkerWatchdog();
     testGlobalConfigRoundtrip();
+    testQuickAccessBookmarks();
 
     // Optional live validation: synccoretest --live <wc> <url> [user] [pass]
     const QStringList args = QCoreApplication::arguments();

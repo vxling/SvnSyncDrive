@@ -125,17 +125,24 @@ void AddRepoDialog::setTrustServerCertificate(bool trust)
     m_worker->setTrustServerCertificate(trust);
 }
 
+void AddRepoDialog::setRepoRoot(const QString &root)
+{
+    const QString trimmed = root.trimmed();
+    if (!trimmed.isEmpty())
+        m_repoRoot = QDir::fromNativeSeparators(trimmed);
+}
+
 QString AddRepoDialog::defaultPathFor(const QString &name)
 {
-    // Cross-platform default: ~/SvnSyncDrive/<name>. Keeps every platform's
-    // working copies in the same predictable place under the user's home.
-    QString dir = QDir::homePath() + QLatin1String("/SvnSyncDrive");
+    // Cross-platform default: <repoRoot>/<name>. Keeps every platform's
+    // working copies in the same predictable place; the root is the global
+    // "repository storage folder" setting (default ~/SvnSyncDrive).
     QString folder = name.trimmed();
     folder.replace(
         QRegularExpression(QStringLiteral(R"([\\/:*?"<>|])")), QStringLiteral("_"));
     if (folder.isEmpty())
         folder = QStringLiteral("repo");
-    return dir + QLatin1Char('/') + folder;
+    return m_repoRoot + QLatin1Char('/') + folder;
 }
 
 void AddRepoDialog::setRepository(const svnsync::Repository &repo)
@@ -156,7 +163,7 @@ void AddRepoDialog::choosePath()
 {
     const QString dir = QFileDialog::getExistingDirectory(
         this, I18n::translate("选择工作副本目录"),
-        m_path->text().isEmpty() ? QDir::homePath() : m_path->text());
+        m_path->text().isEmpty() ? m_repoRoot : m_path->text());
     if (!dir.isEmpty()) {
         m_pathCustomized = true;
         m_path->setText(QDir::toNativeSeparators(dir));

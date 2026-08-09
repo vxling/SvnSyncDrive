@@ -334,6 +334,10 @@ GlobalConfig ConfigStore::loadGlobalConfig()
             config.conflictResolution = value.toInt();
         else if (key == QStringLiteral("language"))
             config.language = value;
+        else if (key == QStringLiteral("repoRoot"))
+            config.repoRoot = value;
+        else if (key == QStringLiteral("quickAccessEnabled"))
+            config.quickAccessEnabled = value.toInt() != 0;
     }
     return config;
 }
@@ -374,6 +378,8 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         put(QStringLiteral("autoResolveConflicts"), QString::number(config.autoResolveConflicts));
         put(QStringLiteral("conflictResolution"), QString::number(config.conflictResolution));
         put(QStringLiteral("language"), config.language);
+        put(QStringLiteral("repoRoot"), config.repoRoot);
+        put(QStringLiteral("quickAccessEnabled"), QString::number(config.quickAccessEnabled));
     }
 
     if (ok)

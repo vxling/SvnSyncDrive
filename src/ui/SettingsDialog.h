@@ -6,6 +6,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QLineEdit;
 class QSpinBox;
 
 /**
@@ -35,4 +36,6 @@ private:
     QSpinBox *m_networkTimeoutSeconds = nullptr;
     QCheckBox *m_autoResolve = nullptr;
     QComboBox *m_conflictResolution = nullptr;
+    QLineEdit *m_repoRoot = nullptr;
+    QCheckBox *m_quickAccess = nullptr;
 };

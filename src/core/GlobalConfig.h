@@ -1,8 +1,15 @@
 #pragma once
 
+#include <QDir>
 #include <QString>
 
 namespace svnsync {
+
+/** Default folder that new working copies are created in (~/SvnSyncDrive). */
+inline QString defaultRepoRoot()
+{
+    return QDir::homePath() + QStringLiteral("/SvnSyncDrive");
+}
 
 /**
  * Application-wide (global) settings shared by every repository engine,
@@ -58,6 +65,16 @@ struct GlobalConfig
 
     /** UI language code: "zh_CN" (default) or "en". */
     QString language = QStringLiteral("zh_CN");
+
+    /** Folder that new working copies are created in (see defaultRepoRoot()).
+     *  Existing repositories keep their own configured path. */
+    QString repoRoot = defaultRepoRoot();
+
+    /** Show a shortcut to the repository storage folder in the file manager
+     *  (This PC + Quick Access on Windows, Nautilus/GTK bookmarks on Linux).
+     *  The entry only ever points at repoRoot; changing repoRoot re-points
+     *  it and toggling this off removes it. */
+    bool quickAccessEnabled = false;
 };
 
 } // namespace svnsync

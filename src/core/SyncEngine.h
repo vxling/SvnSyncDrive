@@ -166,6 +166,11 @@ private:
     // Downward sync.
     void poll();
     void fullSync();
+    /** If a full-sync round was deferred because the engine was busy at its
+     *  timer tick, start it once the engine is idle again (called from the
+     *  end of every scan/poll path). Runs at most once per deferral and never
+     *  re-enters while busy. */
+    void runPendingFullSync();
     void startUpdateInChunks(qlonglong serverRev, qlonglong localRev);
     void afterUpdateDone(qlonglong serverRev, qlonglong localRev,
                          const QStringList &remotePaths, int updatedCount);
@@ -191,6 +196,7 @@ private:
     bool m_rescanPending = false;
     bool m_polling = false;
     bool m_fullSyncing = false;
+    bool m_fullSyncPending = false;
     QSet<QString> m_pendingCommits;
     QSet<QString> m_pendingAdds;
     int m_pendingUpdates = 0;

@@ -401,7 +401,10 @@ void SyncEngine::finishScan()
     if (m_rescanPending) {
         m_rescanPending = false;
         scanAndCommit();
+        return;
     }
+    // A full-sync round may have been deferred while this scan was running.
+    runPendingFullSync();
 }
 
 bool SyncEngine::isTempFile(const QString &path)
@@ -468,6 +471,7 @@ void SyncEngine::poll()
     submit(localItem, [this](const CommandResult &lr) {
         if (!lr.success) {
             m_polling = false;
+            runPendingFullSync();
             return;
         }
         const qlonglong localRev = qMax(lr.revision, m_lastLocalRev);
@@ -479,11 +483,13 @@ void SyncEngine::poll()
         submit(headItem, [this, localRev](const CommandResult &hr) {
             if (!hr.success) {
                 m_polling = false;
+                runPendingFullSync();
                 return;
             }
             const qlonglong serverRev = hr.revision;
             if (serverRev <= localRev) {
                 m_polling = false;
+                runPendingFullSync();
                 return;
             }
             startUpdateInChunks(serverRev, localRev);
@@ -496,8 +502,14 @@ void SyncEngine::fullSync()
     // 15-min periodic full sync: a whole-repo `svn update` (downward, in
     // one pass, no GetServerUpdatePaths chunking) followed by a full
     // upward scan+commit. Both actions always run, in that order.
-    if (m_fullSyncing || m_polling || m_scanning)
+    if (m_fullSyncing || m_polling || m_scanning) {
+        // A poll/scan is already occupying the engine; never drop this full
+        // round. Defer it and let runPendingFullSync() (invoked at the end of
+        // the scan and poll paths) start it as soon as the engine is idle.
+        m_fullSyncPending = true;
         return;
+    }
+    m_fullSyncPending = false;
     m_fullSyncing = true;
     // Watchdog: if a previous cycle ever left the watcher suspended (should
     // not happen, but recover defensively), restore it before proceeding so
@@ -542,6 +554,16 @@ void SyncEngine::fullSync()
     });
 }
 
+void SyncEngine::runPendingFullSync()
+{
+    if (!m_fullSyncPending)
+        return;
+    if (m_fullSyncing || m_polling || m_scanning)
+        return;  // still busy; re-checked at the next idle point
+    m_fullSyncPending = false;
+    fullSync();
+}
+
 void SyncEngine::startUpdateInChunks(qlonglong serverRev, qlonglong localRev)
 {
     CommandItem statusItem;
@@ -552,6 +574,7 @@ void SyncEngine::startUpdateInChunks(qlonglong serverRev, qlonglong localRev)
         if (!r.success) {
             notify(I18n::translate("获取远端变更失败: %1").arg(r.error));
             m_polling = false;
+            runPendingFullSync();
             return;
         }
 
@@ -561,6 +584,7 @@ void SyncEngine::startUpdateInChunks(qlonglong serverRev, qlonglong localRev)
                 remotePaths << e.path;
         if (remotePaths.isEmpty()) {
             m_polling = false;
+            runPendingFullSync();
             return;
         }
 
@@ -617,6 +641,9 @@ void SyncEngine::afterUpdateDone(qlonglong serverRev, qlonglong localRev,
         }
         emit filesChanged();
         m_polling = false;
+        // A full-sync round may have been deferred while this poll was
+        // running; catch it up now that the engine is idle again.
+        runPendingFullSync();
     });
 }
 

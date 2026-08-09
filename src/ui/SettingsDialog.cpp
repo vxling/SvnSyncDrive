@@ -5,8 +5,12 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFileDialog>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -34,6 +38,35 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_startMinimizedToTray->setToolTip(I18n::translate("开启后启动程序不显示主窗口，直接常驻系统托盘"));
     generalForm->addRow(I18n::translate("关闭窗口时最小化"), m_minimizeToTray);
     generalForm->addRow(I18n::translate("启动时隐藏到托盘"), m_startMinimizedToTray);
+
+    // Repository storage folder: where new working copies get created by
+    // default. Existing repositories are not moved by changing this.
+    auto *repoRootRow = new QHBoxLayout;
+    repoRootRow->setSpacing(6);
+    m_repoRoot = new QLineEdit(generalPage);
+    m_repoRoot->setToolTip(
+        I18n::translate("新增仓库时工作副本默认存放的目录；已有仓库不受影响"));
+    auto *browseRoot = new QPushButton(I18n::translate("浏览…"), generalPage);
+    repoRootRow->addWidget(m_repoRoot, 1);
+    repoRootRow->addWidget(browseRoot);
+    generalForm->addRow(I18n::translate("仓库存储目录"), repoRootRow);
+    connect(browseRoot, &QPushButton::clicked, this, [this]() {
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, I18n::translate("选择仓库存储目录"),
+            m_repoRoot->text().trimmed().isEmpty()
+                ? svnsync::defaultRepoRoot()
+                : m_repoRoot->text());
+        if (!dir.isEmpty())
+            m_repoRoot->setText(QDir::toNativeSeparators(dir));
+    });
+
+    m_quickAccess = new QCheckBox(
+        I18n::translate("在文件管理器中添加快捷入口（指向仓库存储目录）"),
+        generalPage);
+    m_quickAccess->setToolTip(
+        I18n::translate("开启后在文件管理器侧栏添加指向存储目录的快捷方式并固定到快速访问；关闭时移除。仅 Windows / Linux 支持"));
+    generalForm->addRow(I18n::translate("文件管理器快捷入口"), m_quickAccess);
+
     tabs->addTab(generalPage, I18n::translate("常规"));
 
     auto *syncPage = new QWidget(tabs);
@@ -136,6 +169,8 @@ void SettingsDialog::setConfig(const svnsync::GlobalConfig &config)
     default: m_conflictResolution->setCurrentIndex(2); break; // Merged
     }
     m_conflictResolution->setEnabled(config.autoResolveConflicts);
+    m_repoRoot->setText(QDir::toNativeSeparators(config.repoRoot));
+    m_quickAccess->setChecked(config.quickAccessEnabled);
 }
 
 svnsync::GlobalConfig SettingsDialog::config() const
@@ -158,5 +193,9 @@ svnsync::GlobalConfig SettingsDialog::config() const
     case 3: config.conflictResolution = 0; break; // Base
     default: config.conflictResolution = 5; break; // Merged
     }
+    const QString root = m_repoRoot->text().trimmed();
+    config.repoRoot = QDir::fromNativeSeparators(
+        root.isEmpty() ? svnsync::defaultRepoRoot() : root);
+    config.quickAccessEnabled = m_quickAccess->isChecked();
     return config;
 }

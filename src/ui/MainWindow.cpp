@@ -2,6 +2,7 @@
 
 #include "core/I18n.h"
 #include "core/LogStore.h"
+#include "core/QuickAccess.h"
 #include "core/RepoManager.h"
 #include "core/SyncEngine.h"
 #include "ui/AddRepoDialog.h"
@@ -95,6 +96,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_manager->load();
     rebuildSidebar();
+
+    // Ensure the file-manager shortcut exists if behaviour is enabled; this
+    // is idempotent and also fixes up the entry after reinstalling or after
+    // the storage root moved while the app was closed.
+    if (m_manager->config().quickAccessEnabled)
+        svnsync::QuickAccess::install(m_manager->config().repoRoot);
 
     setupTrayIcon();
 
@@ -206,6 +213,7 @@ void MainWindow::onAddRequested()
 {
     AddRepoDialog dialog(false, this);
     dialog.setTrustServerCertificate(m_manager->config().trustServerCertificate);
+    dialog.setRepoRoot(m_manager->config().repoRoot);
     if (dialog.exec() != QDialog::Accepted)
         return;
     const svnsync::Repository repo = dialog.repository();
@@ -219,10 +227,19 @@ void MainWindow::onSettingsRequested()
     dialog.setConfig(m_manager->config());
     if (dialog.exec() != QDialog::Accepted)
         return;
+    const svnsync::GlobalConfig oldConfig = m_manager->config();
     const svnsync::GlobalConfig config = dialog.config();
     m_manager->setConfig(config);
     I18n::setLanguage(config.language);
-    setGlobalStatus(I18n::translate("设置已保存"));
+
+    // File-manager shortcut: re-point when the storage root changed, remove
+    // when disabled, install when enabled (this is a no-op if already there).
+    if (config.quickAccessEnabled || oldConfig.repoRoot != config.repoRoot)
+        svnsync::QuickAccess::uninstall(oldConfig.repoRoot);
+    if (config.quickAccessEnabled && !svnsync::QuickAccess::install(config.repoRoot))
+        setGlobalStatus(I18n::translate("设置已保存：文件管理器快捷入口安装失败（请检查权限）"));
+    else
+        setGlobalStatus(I18n::translate("设置已保存"));
 }
 
 void MainWindow::setupTrayIcon()

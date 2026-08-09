@@ -63,6 +63,7 @@ add_library(svnsync_core STATIC
     src/core/CredCrypto.cpp
     src/core/LogStore.cpp
     src/core/AppLog.cpp
+    src/core/QuickAccess.cpp
     src/core/Repository.h
     src/core/SvnCommand.h
     src/core/GlobalConfig.h
