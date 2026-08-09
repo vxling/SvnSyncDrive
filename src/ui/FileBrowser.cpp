@@ -50,7 +50,7 @@ void drawStatusBadge(QPainter *painter, const QRect &area, const QString &text,
     painter->drawEllipse(circle);
     QFont font = painter->font();
     font.setBold(true);
-    font.setPixelSize(qMax(9, d - 6));
+    font.setPixelSize(qMax(8, d - 8));  // one notch smaller than the circle
     painter->setFont(font);
     painter->setPen(QColor(Qt::white));
     painter->drawText(circle, Qt::AlignCenter, text);
