@@ -387,6 +387,8 @@ poll()（60s 定时器；m_polling 防重入）
 9. **上行 Status 纯本地（不加 -u）**；`-u` 只出现在 GetServerUpdatePaths（专门的下行探查）。
 10. `m_lastLocalRev` 只参与 `poll()` 的下行比较；15min `fullSync` 直接整库 `svn update`（本身就是幂等的，无需比较），避免把自己刚提交的内容当作“远端变更”的特殊分支问题。
 11. **fullSync 的 Update 必须 `bypassDedup=true`**：整库 Update（key=`path`）与用户对仓库根目录的“更新”撞 key；被 dedup 吞掉则永远无结果 → `m_fullSyncing` 永久卡死、15min 全量同步从此失效。bypassDedup 让两者都入队、由单 worker 串行执行。
+12. **`svn_client_unlock` 签名随版本变化**：SVN 1.14 及更早是 `(targets, comment, force, pool)`，本仓库目标 SVN 1.15 是 `(targets, force, ctx, pool)`——没有 `comment` 参数且需要传 `ctx`。libsvnplus `unlock()` 按 1.15 签名实现；**unlock 只接受文件目标**，对目录目标报 “is not a working copy”。
+13. **`GetLastChangedTime` 从“恒成功”桩变为真实 ReadOnly `svn info`（HEAD）调用（0.5.3 起）**：现在能返回服务器 last-changed 时间与修订号，但远端不可达 / URL 无效时返回失败——旧桩恒成功。未来冲突对话框等调用方必须按失败处理。
 
 ---
 
@@ -403,8 +405,8 @@ poll()（60s 定时器；m_polling 防重入）
 ### 已知边界
 
 - `syncNow` 只上行不下行（用户已确认此语义）。
-- `GetLastChangedTime` 是桩实现（冲突对话框的服务器时间可能不可用）。
-- `BreakLock` 不支持（直接失败）。
+- `GetLastChangedTime` 已实现（真实服务器 last-changed 时间，0.5.3）。
+- `BreakLock` 已实现（libsvnplus `unlock(breakLock=true)`，即 `svn unlock --force`，0.5.3）。
 
 ### 可选清理（未做）
 

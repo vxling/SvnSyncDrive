@@ -51,6 +51,30 @@ try {
     Write-Host "wc-other: $wcOther"
     Write-Host ""
 
+    # Live BreakLock / GetLastChangedTime integration (real worker + libsvnplus):
+    # lock a committed file, then let the test break that lock with svn unlock --force.
+    $lockFile = "lockme-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".txt"
+    $lockPath = Join-Path $wcApp $lockFile
+    Set-Content -LiteralPath $lockPath -Value "lock test" -Encoding UTF8
+    & $svn add $lockPath
+    if ($LASTEXITCODE -ne 0) { throw "svn add lock file failed" }
+    & $svn commit -m "locktest: add lock file" $lockPath
+    if ($LASTEXITCODE -ne 0) { throw "svn commit lock file failed" }
+    & $svn lock $lockPath
+    if ($LASTEXITCODE -ne 0) { throw "svn lock failed" }
+
+    & $TestExe --locktest $wcApp $lockFile
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "locktest failed"
+        exit $LASTEXITCODE
+    }
+
+    # No lock should remain on the file after --locktest broke it.
+    $locksInfo = (& $svn info --show-item locks $lockPath) -join ""
+    if (-not [string]::IsNullOrWhiteSpace($locksInfo)) {
+        throw "break-lock did not clear the lock"
+    }
+
     & $TestExe --livesync "$url/trunk" $wcApp $wcOther
     $exit = $LASTEXITCODE
     exit $exit

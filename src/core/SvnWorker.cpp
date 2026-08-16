@@ -6,6 +6,7 @@
 #include <svnplus/SvnClient.h>
 
 #include <QDir>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -90,9 +91,7 @@ public:
         case Command::Move: runMove(item, result); break;
         case Command::Revert: runRevert(item, result); break;
         case Command::Resolve: runResolve(item, result); break;
-        case Command::BreakLock:
-            result = makeResult(item, false, QStringLiteral("BreakLock is not supported"));
-            break;
+        case Command::BreakLock: runBreakLock(item, result); break;
         case Command::Commit:
             runHeavyWithLockHeal(item, result, &SvnCommandRunner::runCommit);
             break;
@@ -301,7 +300,35 @@ private:
 
     void runGetLastChangedTime(const CommandItem &item, CommandResult &result)
     {
+        // Server-side last-changed time of the path, saturating the previous
+        // no-op stub: `svn info` reports the node's last-changed date at HEAD.
+        std::vector<SvnPlus::SvnInfo> infos;
+        const SvnPlus::SvnError err = m_client.info(
+            item.path.toStdString(), infos, SvnPlus::SvnRevision::head(),
+            SvnPlus::SvnDepth::Empty, false);
+        if (!err.ok()) {
+            result = fail(item, err);
+            return;
+        }
         result = makeResult(item, true);
+        if (infos.empty())
+            return;
+        const auto when = infos.front().lastChangedDate;
+        if (when != std::chrono::system_clock::time_point{}) {
+            const qint64 secs =
+                std::chrono::duration_cast<std::chrono::seconds>(when.time_since_epoch()).count();
+            result.value = QDateTime::fromSecsSinceEpoch(secs, Qt::UTC)
+                               .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss 'UTC'"));
+        }
+        result.revision = infos.front().lastChangedRevision;
+    }
+
+    void runBreakLock(const CommandItem &item, CommandResult &result)
+    {
+        // `svn unlock --force`: remove a lock even when held by someone else.
+        const SvnPlus::SvnError err =
+            m_client.unlock({ item.path.toStdString() }, /*breakLock*/ true);
+        result = err.ok() ? makeResult(item, true) : fail(item, err);
     }
 
     void runIsVersioned(const CommandItem &item, CommandResult &result)

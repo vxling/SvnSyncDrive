@@ -1475,6 +1475,61 @@ static void runLockHeal(const QString &wc)
     }
 }
 
+/** Live BreakLock + GetLastChangedTime validation against a real working
+ *  copy, driven through the production SvnWorker (real libsvnplus runner):
+ *  1. BreakLock on a locked versioned file (relPath) must succeed — proves
+ *     the real svn unlock --force call is wired,
+ *  2. GetLastChangedTime on the working copy root must return a server-side
+ *     last-changed date and revision (no longer the no-op stub).
+ *  synccoretest --locktest <wc-path> [rel-path-to-locked-file] */
+static void runLockTest(const QString &wc, const QString &relPath = QString())
+{
+    const QString target = relPath.isEmpty() ? wc : wc + QLatin1Char('/') + relPath;
+    std::printf("-- locktest %s --\n", qPrintable(target));
+    if (!QDir(wc).exists()) {
+        check(false, "working copy directory exists");
+        return;
+    }
+    check(QDir(wc + QStringLiteral("/.svn")).exists(), "working copy has .svn metadata");
+
+    {
+        SvnWorker worker;
+        ResultCollector col(worker);
+        worker.start();
+
+        worker.submit(makeItem(Command::BreakLock, target));
+        const bool gotBreak = col.wait(1, 60000);
+        worker.stop();
+        const bool breakOk = gotBreak && !col.results.isEmpty() && col.results.front().success;
+        check(breakOk, "BreakLock succeeds on the locked file");
+        if (gotBreak && !col.results.isEmpty() && !col.results.front().success)
+            std::printf("  break-lock error: %s\n", qPrintable(col.results.front().error));
+    }
+
+    {
+        SvnWorker worker;
+        ResultCollector col(worker);
+        worker.start();
+
+        worker.submit(makeItem(Command::GetLastChangedTime, wc));
+        const bool gotTime = col.wait(1, 60000);
+        worker.stop();
+        if (gotTime && !col.results.isEmpty()) {
+            const CommandResult r = col.results.front();
+            check(r.success, "GetLastChangedTime succeeds on the working copy root");
+            if (r.success) {
+                check(!r.value.isEmpty(), "GetLastChangedTime returns a server timestamp");
+                check(r.revision >= 0, "GetLastChangedTime returns a revision");
+                std::printf("  last-changed: %s @ r%lld\n", qPrintable(r.value), r.revision);
+            } else {
+                std::printf("  get-last-changed-time error: %s\n", qPrintable(r.error));
+            }
+        } else {
+            check(false, "GetLastChangedTime produced a result");
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1547,6 +1602,13 @@ int main(int argc, char *argv[])
     const int lockIdx = args.indexOf(QStringLiteral("--lockheal"));
     if (lockIdx >= 0 && lockIdx + 1 < args.size())
         runLockHeal(args.at(lockIdx + 1));
+
+    // BreakLock integration against a real working copy:
+    // synccoretest --locktest <wc-path> [rel-path-to-locked-file]
+    const int brkIdx = args.indexOf(QStringLiteral("--locktest"));
+    if (brkIdx >= 0 && brkIdx + 1 < args.size())
+        runLockTest(args.at(brkIdx + 1),
+                    brkIdx + 2 < args.size() ? args.at(brkIdx + 2) : QString());
 
     std::printf("==== %s: %d failure(s) ====\n",
                 g_failures == 0 ? "ALL PASS" : "FAILED", g_failures);
