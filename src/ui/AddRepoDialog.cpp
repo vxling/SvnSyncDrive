@@ -1,5 +1,6 @@
 #include "ui/AddRepoDialog.h"
 
+#include "core/ConfigStore.h"
 #include "core/I18n.h"
 #include "core/SvnCommand.h"
 #include "core/SvnWorker.h"
@@ -24,6 +25,15 @@ AddRepoDialog::AddRepoDialog(bool configure, QWidget *parent)
 {
     setWindowTitle(configure ? I18n::translate("仓库配置") : I18n::translate("添加仓库"));
     setMinimumWidth(480);
+
+    // Apply the same per-command network timeout the sync engines use (plus
+    // the watchdog margin) so a hung "测试连接" / checkout against an
+    // unresponsive server gives up after the configured seconds instead of
+    // libsvn's default 600 s.
+    const svnsync::GlobalConfig config = svnsync::ConfigStore::loadGlobalConfig();
+    m_worker->setNetworkTimeout(config.networkTimeoutSec);
+    m_worker->setCommandTimeoutSec(config.networkTimeoutSec + 10);
+    m_worker->setMaxTransferSec(config.maxTransferSec);
 
     auto *layout = new QVBoxLayout(this);
 

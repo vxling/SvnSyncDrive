@@ -158,6 +158,12 @@ private:
     void enqueueFileChange(const QString &path);
     void scanAndCommit();
     void handleScanStatus(const CommandResult &result);
+    /** True when the path is a single file at or above the configured commit
+     *  size gate (maxFileSizeMb). Directories always return false. */
+    bool isOversized(const QString &path) const;
+    /** Report oversized paths in the sync log, once per path per session, so
+     *  a file stuck above the gate does not spam every scan/commit. */
+    void logOversizedOnce(const QStringList &paths, const QString &context);
     void onAutoAddCompleted();
     void onCommitCompleted();
     void maybeFinishScan();
@@ -213,6 +219,9 @@ private:
     // Server-health bookkeeping (see classify()).
     int m_consecutiveNetworkFailures = 0;
     bool m_connectionLost = false;
+
+    // Oversized files already reported this session.
+    QSet<QString> m_loggedHugeFiles;
 };
 
 } // namespace svnsync

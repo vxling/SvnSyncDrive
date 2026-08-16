@@ -100,9 +100,20 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     m_networkTimeoutSeconds->setRange(5, 600);
     m_networkTimeoutSeconds->setSuffix(I18n::translate(" 秒"));
     m_networkTimeoutSeconds->setToolTip(I18n::translate("单次网络操作（如 HTTPS 握手）最多阻塞的秒数；超过后按网络错误处理并继续重试，避免卡住同步"));
+    m_maxTransferMinutes = new QSpinBox(networkPage);
+    m_maxTransferMinutes->setRange(2, 30);
+    m_maxTransferMinutes->setSuffix(I18n::translate(" 分钟"));
+    m_maxTransferMinutes->setToolTip(I18n::translate("一次提交/更新/检出（含单个大文件传输）最多持续的时间，超过后即使仍在传输也会中止，防止大文件长时间占用同步。默认 10 分钟，最大 30 分钟"));
+    m_maxFileSizeMb = new QSpinBox(networkPage);
+    m_maxFileSizeMb->setRange(10, 1024);
+    m_maxFileSizeMb->setSingleStep(10);
+    m_maxFileSizeMb->setSuffix(I18n::translate(" MB"));
+    m_maxFileSizeMb->setToolTip(I18n::translate("单个文件大小超过该门限时不执行提交，并在日志中记录“超大文件”。默认 100 MB，可设置 10 MB ~ 1 GB"));
     networkForm->addRow(I18n::translate("信任自签名证书"), m_trustCert);
     networkForm->addRow(I18n::translate("断网判定阈值"), m_disconnectThreshold);
     networkForm->addRow(I18n::translate("网络超时"), m_networkTimeoutSeconds);
+    networkForm->addRow(I18n::translate("单次传输最长时长"), m_maxTransferMinutes);
+    networkForm->addRow(I18n::translate("单文件提交大小门限"), m_maxFileSizeMb);
     tabs->addTab(networkPage, I18n::translate("网络"));
 
     auto *conflictPage = new QWidget(tabs);
@@ -161,6 +172,8 @@ void SettingsDialog::setConfig(const svnsync::GlobalConfig &config)
     m_maxLogsPerRepo->setValue(config.maxLogsPerRepo);
     m_disconnectThreshold->setValue(config.disconnectThreshold);
     m_networkTimeoutSeconds->setValue(config.networkTimeoutSec);
+    m_maxTransferMinutes->setValue(qBound(2, config.maxTransferSec / 60, 30));
+    m_maxFileSizeMb->setValue(qBound(10, config.maxFileSizeMb, 1024));
     m_autoResolve->setChecked(config.autoResolveConflicts);
     switch (config.conflictResolution) {
     case 0: m_conflictResolution->setCurrentIndex(3); break; // Base
@@ -186,6 +199,8 @@ svnsync::GlobalConfig SettingsDialog::config() const
     config.maxLogsPerRepo = m_maxLogsPerRepo->value();
     config.disconnectThreshold = m_disconnectThreshold->value();
     config.networkTimeoutSec = m_networkTimeoutSeconds->value();
+    config.maxTransferSec = m_maxTransferMinutes->value() * 60;
+    config.maxFileSizeMb = m_maxFileSizeMb->value();
     config.autoResolveConflicts = m_autoResolve->isChecked();
     switch (m_conflictResolution->currentIndex()) {
     case 0: config.conflictResolution = 2; break; // MineFull

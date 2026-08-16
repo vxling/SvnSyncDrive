@@ -53,6 +53,18 @@ struct GlobalConfig
      *  of blocking the worker for libsvn's default 600 seconds. */
     int networkTimeoutSec = 60;
 
+    /** Hard ceiling (seconds) on one heavy-write command (commit/update/
+     *  checkout). The worker watchdog aborts the transfer when it exceeds
+     *  this even if progress keeps arriving, so a single large file can never
+     *  tie up the worker for longer than this. Default 600 s = 10 min; the
+     *  settings dialog caps it at 1800 s = 30 min. */
+    int maxTransferSec = 600;
+
+    /** Per-file upload gate: files at or above this size (MB) are never
+     *  committed; they are skipped and reported in the sync log. Default 100
+     *  MB; allowed range 10..1024 MB (min 10 MB, max 1 GB). */
+    int maxFileSizeMb = 100;
+
     /** Resolve conflicts automatically with conflictResolution instead of
      *  showing the conflict dialog. Tree conflicts are always resolved to
      *  the "working" state (code 5) regardless of this setting. */

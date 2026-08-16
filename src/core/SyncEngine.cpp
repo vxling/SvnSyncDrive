@@ -128,6 +128,8 @@ void SyncEngine::start()
     m_worker->setTrustServerCertificate(m_config.trustServerCertificate);
     m_worker->setNetworkTimeout(m_config.networkTimeoutSec);
     m_worker->setCommandTimeoutSec(m_config.networkTimeoutSec + 10);
+    m_worker->setMaxTransferSec(m_config.maxTransferSec);
+    m_worker->setMaxFileSizeMb(m_config.maxFileSizeMb);
 
     if (!m_watcher->start(m_repo.path))
         notify(I18n::translate("无法监听目录: %1").arg(m_repo.path));
@@ -149,6 +151,8 @@ void SyncEngine::setConfig(const GlobalConfig &config)
     m_worker->setTrustServerCertificate(m_config.trustServerCertificate);
     m_worker->setNetworkTimeout(m_config.networkTimeoutSec);
     m_worker->setCommandTimeoutSec(m_config.networkTimeoutSec + 10);
+    m_worker->setMaxTransferSec(m_config.maxTransferSec);
+    m_worker->setMaxFileSizeMb(m_config.maxFileSizeMb);
 }
 
 void SyncEngine::setCredentials(const QString &username, const QString &password)
@@ -189,8 +193,23 @@ quint64 SyncEngine::submit(const CommandItem &item, Callback callback)
     copy.id = m_idCounter.fetch_add(1) + 1;
     if (copy.repo.isEmpty())
         copy.repo = m_repo.name;
-    if (callback)
-        m_pending.insert(copy.id, std::move(callback));
+    Callback userCallback = std::move(callback);
+    Callback effective;
+    if (copy.command == Command::Commit) {
+        // Commits that bypassed the upward-scan size filter (e.g. manual
+        // commits from the file browser) are still protected by the worker's
+        // per-file size gate; report anything it skipped into the sync log.
+        effective = [this, userCallback](const CommandResult &r) {
+            if (userCallback)
+                userCallback(r);
+            if (!r.oversizedFiles.isEmpty())
+                logOversizedOnce(r.oversizedFiles, QStringLiteral("提交"));
+        };
+    } else {
+        effective = std::move(userCallback);
+    }
+    if (effective)
+        m_pending.insert(copy.id, std::move(effective));
     m_worker->submit(copy);
     return copy.id;
 }
@@ -321,11 +340,16 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
     // that already has one in flight: the worker dedups LocalWrite commands
     // by path, so a duplicate submit would never produce a result and would
     // corrupt our completion bookkeeping. Once all pending adds land we
-    // re-scan so the freshly-added files get committed.
+    // re-scan so the freshly-added files get committed. Files above the size
+    // gate are never added (they must not be committed either).
     if (m_config.autoAddUnversioned) {
         for (const auto &p : unversioned) {
             if (m_pendingAdds.contains(p))
                 continue;
+            if (isOversized(p)) {
+                logOversizedOnce(QStringList{ p }, QStringLiteral("添加"));
+                continue;
+            }
             m_pendingAdds.insert(p);
             CommandItem add;
             add.command = Command::Add;
@@ -343,7 +367,21 @@ void SyncEngine::handleScanStatus(const CommandResult &result)
         }
     }
 
-    const auto groups = groupByDir(changes, m_repo.path);
+    // The worker re-checks sizes on commit too, but dropping oversized files
+    // here keeps the per-directory group counts exact and the commit attempt
+    // itself clean; the skipped paths are reported once per session.
+    QList<StatusEntry> commitChanges;
+    QStringList oversizedChanges;
+    for (const auto &e : changes) {
+        if (isOversized(e.path))
+            oversizedChanges << e.path;
+        else
+            commitChanges.append(e);
+    }
+    if (!oversizedChanges.isEmpty())
+        logOversizedOnce(oversizedChanges, QStringLiteral("提交"));
+
+    const auto groups = groupByDir(commitChanges, m_repo.path);
     for (const auto &g : groups) {
         if (m_pendingCommits.contains(g.dir))
             continue;
@@ -405,6 +443,34 @@ void SyncEngine::finishScan()
     }
     // A full-sync round may have been deferred while this scan was running.
     runPendingFullSync();
+}
+
+bool SyncEngine::isOversized(const QString &path) const
+{
+    if (m_config.maxFileSizeMb <= 0)
+        return false;
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isFile())
+        return false;
+    const qlonglong limit = static_cast<qlonglong>(m_config.maxFileSizeMb)
+        * qlonglong(1024) * qlonglong(1024);
+    return info.size() >= limit;
+}
+
+void SyncEngine::logOversizedOnce(const QStringList &paths, const QString &context)
+{
+    QStringList fresh;
+    for (const auto &p : paths) {
+        if (m_loggedHugeFiles.contains(p))
+            continue;
+        m_loggedHugeFiles.insert(p);
+        fresh << p;
+    }
+    if (fresh.isEmpty())
+        return;
+    notify(I18n::translate("有超大文件（≥ %1 MB），已跳过%2：%3")
+               .arg(m_config.maxFileSizeMb).arg(context)
+               .arg(fresh.join(I18n::translate("、"))));
 }
 
 bool SyncEngine::isTempFile(const QString &path)

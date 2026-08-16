@@ -134,6 +134,34 @@ public:
     void cancel() override {}
 };
 
+/** Runner exposing the worker's keep-alive callback so tests can check the
+ *  heavy-write watchdog: a test execute() can call the callback to simulate
+ *  liveliness (progress/notify events) or let it go silent to simulate a hung
+ *  connection. */
+class KeepAliveRunner : public ICommandRunner
+{
+public:
+    std::function<void()> keepAlive;
+    std::function<CommandResult(const CommandItem &)> onExecute;
+
+    CommandResult execute(const CommandItem &item) override
+    {
+        if (onExecute)
+            return onExecute(item);
+        return makeResult(item, true);
+    }
+    void setCredentials(const QString &, const QString &) override {}
+    void setTrustServerCertificate(bool) override {}
+    void setNetworkTimeout(int) override {}
+    void setKeepAlive(std::function<void()> fn) override
+    {
+        keepAlive = std::move(fn);
+    }
+    void setMaxFileSizeMb(int) override {}
+    void cancel() override { cancelled = true; }
+    bool cancelled = false;
+};
+
 /**
  * Collects results via a connection that must be created BEFORE the commands
  * are submitted. The worker runs on a raw std::thread and can execute every
@@ -1005,6 +1033,74 @@ static bool testWorkerWatchdog()
     return true;
 }
 
+static bool testHeavyWatchdog()
+{
+    std::printf("-- SvnWorker heavy watchdog (idle gap + transfer cap) --\n");
+
+    // 1) A commit that never emits liveness events is cancelled after the
+    //    inactivity gap (same wall-clock as the old total-time watchdog).
+    {
+        auto *raw = new KeepAliveRunner;
+        SvnWorker worker;
+        worker.start([raw]() -> std::unique_ptr<ICommandRunner> {
+            return std::unique_ptr<ICommandRunner>(raw);
+        });
+        std::atomic<bool> started{ false };
+        raw->onExecute = [&started, raw](const CommandItem &item) {
+            started.store(true);
+            while (!raw->cancelled)
+                QThread::msleep(10);
+            return makeResult(item, true);
+        };
+        worker.setCommandTimeoutSec(1);
+        worker.setMaxTransferSec(0);  // cap disabled: only the idle gap applies
+        worker.submit(makeItem(Command::Commit, QStringLiteral("/wc")));
+        check(waitUntil([&] { return started.load(); }), "heavy commit started");
+        check(waitUntil([&] { return raw->cancelled; }, 5000),
+              "idle watchdog cancels a silent stuck commit");
+        worker.stop();
+    }
+
+    // 2) Continuous liveness must NOT trip the inactivity gap, but the
+    //    absolute transfer cap still cancels a long-running transfer.
+    {
+        auto *raw = new KeepAliveRunner;
+        SvnWorker worker;
+        worker.start([raw]() -> std::unique_ptr<ICommandRunner> {
+            return std::unique_ptr<ICommandRunner>(raw);
+        });
+        const int capMs = 1500;
+        std::atomic<bool> started{ false };
+        raw->onExecute = [&started, raw, capMs](const CommandItem &item) {
+            started.store(true);
+            QElapsedTimer timer;
+            timer.start();
+            while (!raw->cancelled && timer.elapsed() < capMs + 2000) {
+                if (raw->keepAlive)
+                    raw->keepAlive();  // heartbeat: a busy transfer
+                QThread::msleep(20);
+            }
+            return makeResult(item, true);
+        };
+        check(waitUntil([&] { return raw->keepAlive != nullptr; }),
+              "worker installed the keep-alive callback");
+        worker.setCommandTimeoutSec(1);   // 1 s inactivity gap
+        worker.setMaxTransferSec(1);      // 1 s absolute transfer cap
+        QElapsedTimer outer;
+        outer.start();
+        worker.submit(makeItem(Command::Update, QStringLiteral("/wc")));
+        check(waitUntil([&] { return started.load(); }), "heavy update started");
+        const bool cancelled = waitUntil([&] { return raw->cancelled; }, 6000);
+        const qint64 elapsed = outer.elapsed();
+        check(cancelled, "transfer cap cancels a live-but-overdue heavy command");
+        check(elapsed >= 1000,
+              "liveness kept it alive past the 1 s inactivity gap");
+        worker.stop();
+    }
+
+    return true;
+}
+
 static bool testGlobalConfigRoundtrip()
 {
     std::printf("-- ConfigStore global config round-trip --\n");
@@ -1022,6 +1118,8 @@ static bool testGlobalConfigRoundtrip()
     check(defaults.maxLogsPerRepo == 10000, "default max logs per repo");
     check(defaults.disconnectThreshold == 3, "default disconnect threshold");
     check(defaults.networkTimeoutSec == 60, "default network timeout");
+    check(defaults.maxTransferSec == 600, "default max transfer 10 min");
+    check(defaults.maxFileSizeMb == 100, "default max file size 100 MB");
     check(!defaults.autoResolveConflicts, "default auto-resolve off");
     check(defaults.conflictResolution == 2, "default conflict resolution is MineFull");
     check(defaults.language == QStringLiteral("zh_CN"), "default language is Chinese");
@@ -1040,6 +1138,8 @@ static bool testGlobalConfigRoundtrip()
     custom.maxLogsPerRepo = 500;
     custom.disconnectThreshold = 7;
     custom.networkTimeoutSec = 120;
+    custom.maxTransferSec = 900;
+    custom.maxFileSizeMb = 512;
     custom.autoResolveConflicts = true;
     custom.conflictResolution = 1;
     custom.language = QStringLiteral("en");
@@ -1057,6 +1157,8 @@ static bool testGlobalConfigRoundtrip()
     check(loaded.maxLogsPerRepo == 500, "max logs round-trips");
     check(loaded.disconnectThreshold == 7, "disconnect threshold round-trips");
     check(loaded.networkTimeoutSec == 120, "network timeout round-trips");
+    check(loaded.maxTransferSec == 900, "max transfer round-trips");
+    check(loaded.maxFileSizeMb == 512, "max file size round-trips");
     check(loaded.autoResolveConflicts, "auto-resolve round-trips");
     check(loaded.conflictResolution == 1, "conflict resolution round-trips");
     check(loaded.language == QStringLiteral("en"), "language round-trips");
@@ -1067,7 +1169,8 @@ static bool testGlobalConfigRoundtrip()
     ConfigStore::setDatabaseFileForTest(dir.path() + QStringLiteral("/config.db"));
     loaded = ConfigStore::loadGlobalConfig();
     check(loaded.pollIntervalMs == 5000 && loaded.disconnectThreshold == 7
-              && loaded.networkTimeoutSec == 120,
+              && loaded.networkTimeoutSec == 120 && loaded.maxTransferSec == 900
+              && loaded.maxFileSizeMb == 512,
           "values survive a restart (re-opened database)");
 
     ConfigStore::setDatabaseFileForTest(QString());
@@ -1556,6 +1659,7 @@ int main(int argc, char *argv[])
     testSyncEngineClassify();
     testSyncEngineFullSyncNotDropped();
     testWorkerWatchdog();
+    testHeavyWatchdog();
     testGlobalConfigRoundtrip();
     testQuickAccessBookmarks();
 

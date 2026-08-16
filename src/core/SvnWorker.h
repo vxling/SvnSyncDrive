@@ -8,6 +8,7 @@
 
 #include <condition_variable>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -61,8 +62,21 @@ public:
 
     /** Hard watchdog timeout per command (seconds); 0 disables it. When a
      *  command exceeds this, the runner's cancel() is called. Must be larger
-     *  than the network timeout so a normal timeout error arrives first. */
+     *  than the network timeout so a normal timeout error arrives first.
+     *  For heavy-write commands this is interpreted as the allowed gap
+     *  between liveness events (see setMaxTransferSec). */
     void setCommandTimeoutSec(int seconds);
+
+    /** Absolute cap (seconds) for one heavy-write command (commit/update/
+     *  checkout). Unlike the gap timeout above this is measured from the
+     *  command start and aborts the transfer even when liveness events keep
+     *  arriving, bounding how long a single file transfer may run.
+     *  0 disables the cap (not recommended). */
+    void setMaxTransferSec(int seconds);
+
+    /** Per-file upload gate in MB: commits skip files at or above this size
+     *  and report them through CommandResult::oversizedFiles. 0 disables. */
+    void setMaxFileSizeMb(int megabytes);
 
 signals:
     void resultReady(quint64 id, const CommandResult &result);
@@ -70,6 +84,7 @@ signals:
 
 private:
     void workerLoop();
+    void pulse();
     CommandItem takeNextLocked();
     bool heavyWriteAllowedLocked(const CommandItem &item);
     void removeFromDedupLocked(const CommandItem &item);
@@ -98,7 +113,11 @@ private:
     bool m_credsDirty = true;
 
     std::atomic<int> m_commandTimeoutSec{ 0 };
+    std::atomic<int> m_maxTransferSec{ 600 };
+    std::atomic<int> m_maxFileSizeMb{ 0 };
     std::condition_variable m_watchdogCv;
+    std::chrono::steady_clock::time_point m_lastActivity =
+        std::chrono::steady_clock::now();
 };
 
 } // namespace svnsync

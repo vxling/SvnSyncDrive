@@ -328,6 +328,10 @@ GlobalConfig ConfigStore::loadGlobalConfig()
             config.disconnectThreshold = value.toInt();
         else if (key == QStringLiteral("networkTimeoutSec"))
             config.networkTimeoutSec = value.toInt();
+        else if (key == QStringLiteral("maxTransferSec"))
+            config.maxTransferSec = value.toInt();
+        else if (key == QStringLiteral("maxFileSizeMb"))
+            config.maxFileSizeMb = value.toInt();
         else if (key == QStringLiteral("autoResolveConflicts"))
             config.autoResolveConflicts = value.toInt() != 0;
         else if (key == QStringLiteral("conflictResolution"))
@@ -375,6 +379,8 @@ void ConfigStore::saveGlobalConfig(const GlobalConfig &config)
         put(QStringLiteral("maxLogsPerRepo"), QString::number(config.maxLogsPerRepo));
         put(QStringLiteral("disconnectThreshold"), QString::number(config.disconnectThreshold));
         put(QStringLiteral("networkTimeoutSec"), QString::number(config.networkTimeoutSec));
+        put(QStringLiteral("maxTransferSec"), QString::number(config.maxTransferSec));
+        put(QStringLiteral("maxFileSizeMb"), QString::number(config.maxFileSizeMb));
         put(QStringLiteral("autoResolveConflicts"), QString::number(config.autoResolveConflicts));
         put(QStringLiteral("conflictResolution"), QString::number(config.conflictResolution));
         put(QStringLiteral("language"), config.language);

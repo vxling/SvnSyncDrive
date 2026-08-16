@@ -11,6 +11,9 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include <algorithm>
+#include <chrono>
+
 namespace svnsync {
 
 namespace {
@@ -119,12 +122,32 @@ public:
         m_client.setNetworkTimeout(timeoutSeconds);
     }
 
+    void setKeepAlive(std::function<void()> keepAlive) override
+    {
+        m_keepAlive = std::move(keepAlive);
+    }
+
+    void setMaxFileSizeMb(int megabytes) override
+    {
+        m_maxFileBytes = megabytes > 0
+            ? static_cast<qlonglong>(megabytes) * qlonglong(1024) * qlonglong(1024)
+            : 0;
+    }
+
     void cancel() override
     {
         m_client.cancel();
     }
 
 private:
+    /** Liveness heartbeat forwarded to the worker watchdog. Called from the
+     *  libsvnplus progress/notify callbacks while execute() blocks on the
+     *  worker thread, so it must not touch the runner's SvnClient. */
+    void pump()
+    {
+        if (m_keepAlive)
+            m_keepAlive();
+    }
     static CommandResult fail(const CommandItem &item, const SvnPlus::SvnError &err)
     {
         return makeResult(item, false, errorText(err));
@@ -436,9 +459,70 @@ private:
 
     void runCommit(const CommandItem &item, CommandResult &result)
     {
+        std::vector<std::string> targets;
+        targets.push_back(item.path.toStdString());
+
+        // Upload gate: single files at or above the configured threshold are
+        // never committed (skipped and reported), so a huge file can neither
+        // be uploaded by the auto-sync nor by a manual commit. The same walk
+        // also yields the commit scope: when oversized files are present the
+        // directory target is replaced by the explicit list of changed paths
+        // minus the oversized ones, so the rest of the directory still lands
+        // in the same revision while the big files stay behind.
+        if (m_maxFileBytes > 0) {
+            std::vector<SvnPlus::SvnStatus> statuses;
+            SvnPlus::SvnStatusOptions opts;
+            opts.depth = SvnPlus::SvnDepth::Infinity;
+            const SvnPlus::SvnError serr =
+                m_client.status(item.path.toStdString(), statuses, opts);
+            if (!serr.ok()) {
+                // Status failed: fall back to a plain directory commit rather
+                // than refusing valid uploads.
+                statuses.clear();
+            }
+            QStringList oversized;
+            QStringList changedFiles;
+            bool hasOversize = false;
+            for (const auto &s : statuses) {
+                if (!s.versioned)
+                    continue;
+                const StatusKind kind = toStatusKind(s.nodeStatus);
+                if (kind == StatusKind::None || kind == StatusKind::Normal)
+                    continue;
+                const QString path = QDir::fromNativeSeparators(QString::fromStdString(s.localAbspath));
+                const bool uploadsBytes = kind == StatusKind::Added
+                    || kind == StatusKind::Modified
+                    || kind == StatusKind::Replaced
+                    || kind == StatusKind::Merged;
+                if (uploadsBytes && QFileInfo(path).exists()
+                    && QFileInfo(path).size() >= m_maxFileBytes) {
+                    oversized << path;
+                    hasOversize = true;
+                    continue;
+                }
+                changedFiles << path;
+            }
+            if (hasOversize) {
+                if (changedFiles.isEmpty()) {
+                    // Nothing left to upload: report a clean no-op instead of
+                    // a failure so callers do not surface a misleading error.
+                    CommandResult blocked = makeResult(item, true);
+                    blocked.oversizedFiles = oversized;
+                    result = blocked;
+                    return;
+                }
+                result.oversizedFiles = oversized;
+                targets.clear();
+                for (const auto &p : changedFiles)
+                    targets.push_back(p.toStdString());
+            }
+        }
+
+        m_client.setProgressCallback([this](long long, long long) { pump(); });
         SvnPlus::SvnCommitInfo info;
-        const SvnPlus::SvnError err = m_client.commit(
-            { item.path.toStdString() }, item.message.toStdString(), false, &info);
+        const SvnPlus::SvnError err =
+            m_client.commit(targets, item.message.toStdString(), false, &info);
+        m_client.setProgressCallback({});
         if (!err.ok()) {
             result = fail(item, err);
             return;
@@ -458,7 +542,8 @@ private:
         }
 
         int updatedCount = 0;
-        m_client.setNotifyCallback([&updatedCount](const SvnPlus::SvnNotifyEvent &e) {
+        m_client.setNotifyCallback([this, &updatedCount](const SvnPlus::SvnNotifyEvent &e) {
+            pump();
             using A = SvnPlus::SvnNotifyAction;
             switch (e.action) {
             case A::UpdateAdd:
@@ -474,12 +559,14 @@ private:
                 break;
             }
         });
+        m_client.setProgressCallback([this](long long, long long) { pump(); });
 
         std::vector<SvnPlus::SvnRevision> revisions;
         const SvnPlus::SvnError err = m_client.update(
             paths, SvnPlus::SvnRevision::head(), SvnPlus::SvnDepth::Infinity,
             false, false, &revisions);
         m_client.setNotifyCallback({});
+        m_client.setProgressCallback({});
 
         if (!err.ok()) {
             result = fail(item, err);
@@ -494,10 +581,14 @@ private:
     void runCheckout(const CommandItem &item, CommandResult &result)
     {
         SvnPlus::SvnRevision revision;
+        m_client.setProgressCallback([this](long long, long long) { pump(); });
+        m_client.setNotifyCallback([this](const SvnPlus::SvnNotifyEvent &) { pump(); });
         const SvnPlus::SvnError err = m_client.checkout(
             item.repoUrl.toStdString(), item.path.toStdString(),
             SvnPlus::SvnRevision::head(), SvnPlus::SvnDepth::Infinity,
             false, &revision);
+        m_client.setProgressCallback({});
+        m_client.setNotifyCallback({});
         if (!err.ok()) {
             result = fail(item, err);
             return;
@@ -507,6 +598,9 @@ private:
     }
 
     SvnPlus::SvnClient m_client;
+
+    std::function<void()> m_keepAlive;
+    qlonglong m_maxFileBytes = 0;
 
     QString m_lastLockRoot;
     QElapsedTimer m_lastLockElapsed;
@@ -623,11 +717,40 @@ void SvnWorker::setCommandTimeoutSec(int seconds)
     m_commandTimeoutSec.store(seconds > 0 ? seconds : 0);
 }
 
+void SvnWorker::setMaxTransferSec(int seconds)
+{
+    m_maxTransferSec.store(seconds > 0 ? seconds : 0);
+}
+
+void SvnWorker::setMaxFileSizeMb(int megabytes)
+{
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_maxFileSizeMb.store(megabytes > 0 ? megabytes : 0);
+        m_credsDirty = true;
+    }
+    m_cv.notify_all();
+}
+
+/** Liveness heartbeat from a running heavy-write command: refreshes the
+ *  watchdog timestamp (guarded by m_mutex so the watchdog thread can observe
+ *  it under the same lock) and naps the watchdog back to sleep. The callback
+ *  only ever fires on the worker thread while a command is executing, at
+ *  which point the loop owns m_runner and m_mutex is not held. */
+void SvnWorker::pulse()
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    m_lastActivity = std::chrono::steady_clock::now();
+    m_watchdogCv.notify_all();
+}
+
 void SvnWorker::workerLoop()
 {
     {
         std::lock_guard<std::mutex> lk(m_mutex);
         m_runner = m_factory();
+        m_runner->setKeepAlive([this] { pulse(); });
+        m_runner->setMaxFileSizeMb(m_maxFileSizeMb.load());
     }
 
     while (true) {
@@ -638,6 +761,7 @@ void SvnWorker::workerLoop()
                 m_runner->setCredentials(m_username, m_password);
                 m_runner->setTrustServerCertificate(m_trustCert);
                 m_runner->setNetworkTimeout(m_networkTimeoutSec);
+                m_runner->setMaxFileSizeMb(m_maxFileSizeMb.load());
                 m_credsDirty = false;
             }
             m_cv.wait(lk, [this] {
@@ -654,6 +778,7 @@ void SvnWorker::workerLoop()
                 m_runner->setCredentials(m_username, m_password);
                 m_runner->setTrustServerCertificate(m_trustCert);
                 m_runner->setNetworkTimeout(m_networkTimeoutSec);
+                m_runner->setMaxFileSizeMb(m_maxFileSizeMb.load());
                 m_credsDirty = false;
             }
             item = takeNextLocked();
@@ -661,19 +786,51 @@ void SvnWorker::workerLoop()
 
         CommandResult result;
         const int timeoutSec = m_commandTimeoutSec.load();
-        if (timeoutSec <= 0) {
+        const bool isHeavy = categoryOf(item.command) == Category::HeavyWrite;
+        const bool needWatchdog =
+            timeoutSec > 0 || (isHeavy && m_maxTransferSec.load() > 0);
+        if (!needWatchdog) {
             result = m_runner->execute(item);
         } else {
-            // Watchdog: if the command outlives the timeout (e.g. a TCP/SSL
-            // handshake that neither connected nor failed), abort it so a
-            // single stuck command cannot block the whole worker.
+            if (isHeavy) {
+                {
+                    std::lock_guard<std::mutex> lk(m_mutex);
+                    m_lastActivity = std::chrono::steady_clock::now();
+                }
+            }
+            // Watchdog: abort a command that hangs or that outlives its
+            // budget. Heavy writes (commit/update/checkout) get two
+            // independent conditions — an inactivity window between liveness
+            // heartbeats (cancels a hung connection even when progress keeps
+            // the socket open) and an absolute cap from the command start
+            // (bounds any single file transfer). Other commands keep the
+            // plain total-time window.
             bool watchdogDone = false;
-            std::thread watchdog([this, timeoutSec, &watchdogDone]() {
+            std::thread watchdog([this, timeoutSec, isHeavy, &watchdogDone]() {
                 std::unique_lock<std::mutex> lk(m_mutex);
-                m_watchdogCv.wait_for(lk, std::chrono::seconds(timeoutSec),
-                                      [this, &watchdogDone] {
-                                          return m_stopping || watchdogDone;
-                                      });
+                const auto start = std::chrono::steady_clock::now();
+                if (isHeavy) {
+                    const auto gap = std::chrono::seconds(timeoutSec > 0 ? timeoutSec : 120);
+                    const int capSec = m_maxTransferSec.load();
+                    const auto capEnd = capSec > 0
+                        ? start + std::chrono::seconds(capSec)
+                        : std::chrono::steady_clock::time_point::max();
+                    auto idleEnd = m_lastActivity + gap;
+                    while (!m_stopping && !watchdogDone) {
+                        const auto now = std::chrono::steady_clock::now();
+                        if (now >= idleEnd)   // no liveness inside the gap -> hung
+                            break;
+                        if (now >= capEnd)    // transfer ran past the hard cap
+                            break;
+                        m_watchdogCv.wait_until(lk, std::min(idleEnd, capEnd));
+                        idleEnd = m_lastActivity + gap;
+                    }
+                } else {
+                    m_watchdogCv.wait_for(lk, std::chrono::seconds(timeoutSec),
+                                          [this, &watchdogDone] {
+                                              return m_stopping || watchdogDone;
+                                          });
+                }
                 if (!watchdogDone)
                     m_runner->cancel();
             });

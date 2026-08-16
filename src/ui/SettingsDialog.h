@@ -34,6 +34,8 @@ private:
     QSpinBox *m_maxLogsPerRepo = nullptr;
     QSpinBox *m_disconnectThreshold = nullptr;
     QSpinBox *m_networkTimeoutSeconds = nullptr;
+    QSpinBox *m_maxTransferMinutes = nullptr;
+    QSpinBox *m_maxFileSizeMb = nullptr;
     QCheckBox *m_autoResolve = nullptr;
     QComboBox *m_conflictResolution = nullptr;
     QLineEdit *m_repoRoot = nullptr;

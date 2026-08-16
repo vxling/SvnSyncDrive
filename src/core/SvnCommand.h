@@ -138,6 +138,7 @@ struct CommandResult
     QList<StatusEntry> statuses;
     QList<InfoEntry> infos;
     QStringList treeConflicts;  // conflicted paths that are tree conflicts (GetConflictedFiles)
+    QStringList oversizedFiles; // commit input skipped because they are >= the size gate
 };
 
 CommandResult makeResult(const CommandItem &item, bool success, const QString &error = QString());

@@ -389,6 +389,14 @@ poll()（60s 定时器；m_polling 防重入）
 11. **fullSync 的 Update 必须 `bypassDedup=true`**：整库 Update（key=`path`）与用户对仓库根目录的“更新”撞 key；被 dedup 吞掉则永远无结果 → `m_fullSyncing` 永久卡死、15min 全量同步从此失效。bypassDedup 让两者都入队、由单 worker 串行执行。
 12. **`svn_client_unlock` 签名随版本变化**：SVN 1.14 及更早是 `(targets, comment, force, pool)`，本仓库目标 SVN 1.15 是 `(targets, force, ctx, pool)`——没有 `comment` 参数且需要传 `ctx`。libsvnplus `unlock()` 按 1.15 签名实现；**unlock 只接受文件目标**，对目录目标报 “is not a working copy”。
 13. **`GetLastChangedTime` 从“恒成功”桩变为真实 ReadOnly `svn info`（HEAD）调用（0.5.3 起）**：现在能返回服务器 last-changed 时间与修订号，但远端不可达 / URL 无效时返回失败——旧桩恒成功。未来冲突对话框等调用方必须按失败处理。
+14. **超时护栏必须覆盖所有网络入口**：同步引擎（SyncEngine）会对 worker 设 `http-timeout`(networkTimeoutSec，默认 60s) + 命令看门狗(+10s)；libsvnplus 在每个操作前重推 http-timeout。但 `AddRepoDialog` 的临时 worker（测试连接 / 创建工作副本）曾未设超时 → 服务端无响应时会被 libsvn 默认 600s 阻塞。0.5.3 起对话框同样用全局配置注入两层超时。
+15. **HeavyWrite 改为“空闲看门狗 + 传输上限”双阈值**：旧的看门狗按命令墙钟总时长（networkTimeout+10s）一刀切，大文件在正常上传但没跑完时限时会被误杀。0.5.3 起 Commit/Update/Checkout 执行前挂 progress/notify 回调作为“心跳”（runner `pump()` → worker `pulse()`，刷新 `m_lastActivity`）；看门狗改为：①**空闲窗口**＝距最后一次心跳超过 networkTimeout+10s 仍无任何事件 → `cancel()`（真·网络挂死）；②**传输上限**＝`maxTransferSec`（默认 600s，设置项 2~30 分钟）从命令开始计时，到点即使仍在传也 `cancel()`（防单个大文件无限占用 worker）。持续有心跳的慢传输不会被误杀。非 HeavyWrite 命令维持原固定总时长看门狗。libsvnplus 层无需新增 API：progress/notify 回调在上下文创建时已就绪，且 commit 上传路径（ra 层公共代码）确实会触发 progress。
+16. **单文件上传尺寸门限（`maxFileSizeMb`，默认 100MB，可配 10MB~1GB）**：文件达到阈值时不再提交：
+    - 上行扫描（`handleScanStatus`）：`Unversioned` 的超大文件**不自动 `svn add`**，`changes` 中的超大文件**不参与目录分组提交**（保证分组计数准确，也不白跑一次提交）。
+    - `SvnCommandRunner::runCommit` 是权威兜底：先 `svn status`（Infinity）找出本次会被上传的变更文件，≥ 门限的放入 `CommandResult::oversizedFiles` 并从提交目标中剔除；目录内其余变更仍会提交（同一 revision），全部被跳过时返回“成功但无提交”（避免误报“提交失败”）。
+    - 手动提交（FileBrowser，不经上行扫描）同样被该漏斗拦截；`SyncEngine::submit` 对 Commit 统一包装，把 `oversizedFiles` 写入仓库同步日志（每个路径每会话只记一次，避免每次全量同步刷屏）。
+    - 日志文案示例："有超大文件（≥ 100 MB），已跳过提交：…"。
+    - Status 探测失败时回退为普通目录提交，绝不因检查失败而拒放合法上传。
 
 ---
 
