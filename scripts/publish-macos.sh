@@ -17,21 +17,23 @@ BIN="$APP_DIR/Contents/MacOS/svnsyncdrive"
 FRAMEWORKS="$APP_DIR/Contents/Frameworks"
 PUBLISH="$BUILD/publish"
 
+ARCH="${HOMEBREW_ARCH:-$(uname -m)}"
+echo "Detected macOS architecture: $ARCH"
+
 [ -n "${QT_ROOT:-}" ] || { echo "QT_ROOT not set" >&2; exit 1; }
 [ -n "${SVN_STAGE:-}" ] || { echo "SVN_STAGE not set" >&2; exit 1; }
 [ -x "$QT_ROOT/bin/qmake" ] || { echo "qmake not found under QT_ROOT=$QT_ROOT" >&2; exit 1; }
 [ -d "$SVN_STAGE/lib" ] || { echo "SVN_STAGE/lib missing under $SVN_STAGE" >&2; exit 1; }
-[ "$(uname -m)" = "arm64" ] || { echo "Expected an arm64 (Apple Silicon) host" >&2; exit 1; }
 
 if [ -z "${VERSION:-}" ]; then
     VERSION="$(sed -n 's/^project(SvnSyncDrive VERSION \([0-9.]*\).*/\1/p' "$ROOT/CMakeLists.txt")"
 fi
-echo "Building SvnSyncDrive $VERSION for macOS arm64"
+echo "Building SvnSyncDrive $VERSION for macOS $ARCH"
 
 rm -rf "$BUILD"
 cmake -S "$ROOT" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DCMAKE_OSX_ARCHITECTURES="$ARCH" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
     -DCMAKE_PREFIX_PATH="$QT_ROOT" \
     -DLIBSVNPLUS_ROOT="$SVN_STAGE" \
@@ -68,7 +70,7 @@ echo "Load commands of $BIN:"
 otool -l "$BIN" | grep -E "path | name " || true
 
 mkdir -p "$PUBLISH"
-DMG="$PUBLISH/SvnSyncDrive-${VERSION}-macos-arm64.dmg"
+DMG="$PUBLISH/SvnSyncDrive-${VERSION}-macos-${ARCH}.dmg"
 hdiutil create -volname "SvnSyncDrive" -srcfolder "$APP_DIR" -ov -format UDZO "$DMG"
 
 echo "Built $DMG"
